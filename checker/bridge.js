@@ -31,7 +31,10 @@ export async function callBridge(url, token, action, payload = {}, timeoutMs = 5
   try {
     data = JSON.parse(text);
   } catch {
-    const hint = /<html/i.test(text) ? ' — kiểm tra web app đã deploy với "Who has access: Anyone" chưa' : '';
+    const hint = res.status === 401 || res.status === 403
+      ? ' — web app đang đòi đăng nhập Google: Deploy → Manage deployments → "Who has access" phải là "Anyone",'
+        + ' và secret SHEET_BRIDGE_URL phải là URL kết thúc bằng /exec (xem docs/setup.md mục F)'
+      : /<html/i.test(text) ? ' — kiểm tra web app đã deploy với "Who has access: Anyone" chưa' : '';
     throw new Error(`Apps Script trả về không phải JSON (HTTP ${res.status})${hint}`);
   }
   if (!data.ok) throw new Error(`Apps Script báo lỗi (${action}): ${data.error || 'không rõ'}`);

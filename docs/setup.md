@@ -92,8 +92,10 @@ Sheet giờ có: `Config`, `Exclude`, `Streams` và `_data` (ẩn).
 **C2. Chạy.** Tick ô **B7 “Chạy ngay”**. Ô C7 báo *“Đã gửi yêu cầu chạy lúc …”*.
 (Hoặc trên GitHub: tab **Actions → IPTV check → Run workflow → main → Run workflow**.)
 
-**C3. Theo dõi.** Tab **Actions** trên GitHub → lần chạy mới nhất (khoảng 3–5 phút với phạm vi VN).
-Xong: bấm vào lần chạy → phần **Summary** có bảng số link theo trạng thái.
+**C3. Theo dõi.** Ngay trong sheet `Config`, dòng 8 **Tiến trình** tự cập nhật mỗi phút:
+*Đang chờ GitHub bắt đầu chạy…* → *Đang chạy… (đã N phút)* → *✓ Xong lúc …* hoặc *✗ Lỗi lúc …*.
+Ô C8 **Xem chi tiết trên GitHub** mở đúng lần chạy đó (phần **Summary** có bảng số link theo trạng thái; nếu lỗi, log ghi rõ nguyên nhân).
+Phạm vi VN thường xong sau khoảng 2–3 phút.
 
 **C4. Bật dashboard** (chỉ làm một lần, sau khi lần chạy đầu xong vì nó tạo nhánh `gh-pages`):
 **Settings → Pages → Build and deployment → Source: Deploy from a branch → Branch: `gh-pages` / `(root)` → Save**.
@@ -140,6 +142,8 @@ Khoảng 1–2 phút sau mở <https://tienbeta.github.io/iptv_monitor/>.
 | Triệu chứng | Nguyên nhân | Cách sửa |
 |---|---|---|
 | Run có cảnh báo “Chưa có secret … bỏ qua lần chạy này” | Chưa làm B3 | Thêm 2 secret |
+| “Apps Script trả về không phải JSON (HTTP 401)” | GitHub bị Google bắt đăng nhập: web app không để **Anyone**, hoặc URL trong secret là bản `/dev` | Apps Script → **Deploy → Manage deployments** → bút chì → *Who has access*: **Anyone** → Version: **New version** → **Deploy**. Kiểm tra secret `SHEET_BRIDGE_URL` kết thúc bằng `/exec`. Thử: mở URL trong cửa sổ ẩn danh phải thấy `{"ok":true,…}` mà không phải đăng nhập |
+| Danh sách *Who has access* không có **Anyone** (chỉ có “Anyone within <công ty>” / “Anyone with Google account”) | Tài khoản Google Workspace công ty bị admin chặn chia sẻ ra ngoài | Nhờ admin cho phép, hoặc tạo Sheet + Apps Script bằng tài khoản Gmail cá nhân rồi chia sẻ Sheet cho MKT |
 | “Apps Script trả về không phải JSON … Who has access: Anyone” | Web app deploy sai quyền truy cập | Làm lại A5 với **Anyone** |
 | “Apps Script báo lỗi (load): unauthorized” | Bridge token trong secret không khớp | **IPTV Monitor → Xem bridge token** → cập nhật secret `SHEET_BRIDGE_TOKEN` |
 | “chưa có sheet Config” | Chưa chạy **Cài đặt ban đầu** | Làm A4 |
