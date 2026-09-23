@@ -163,7 +163,7 @@ describe('toàn bộ luồng qua Google Sheet (giả lập)', () => {
   test('sai bridge token → dừng với lỗi rõ ràng', async () => {
     await assert.rejects(
       runMonitor({ env: { ...env(), SHEET_BRIDGE_TOKEN: 'wrong' }, checkOptions: FAST }),
-      /Apps Script báo lỗi \(load\): unauthorized/,
+      /Apps Script từ chối \(load\): Sheet ở link này chờ token mã [0-9A-F]{6}, nhưng nhận được token mã [0-9A-F]{6} dài 5 ký tự\. GitHub đang gửi token mã [0-9A-F]{6} dài 5 ký tự/,
     );
   });
 });

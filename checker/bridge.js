@@ -1,7 +1,11 @@
 // Talks to the Apps Script web app bound to the Google Sheet, and converts
 // between stream objects and the 2-D tables the Sheet stores.
 
+import { createHash } from 'node:crypto';
 import { STATUS_LABELS, reasonFor } from './status.js';
+
+// Same fingerprint as tokenCode_() in Code.gs: first 3 bytes of SHA-256, upper-case hex.
+export const tokenCode = (token) => createHash('sha256').update(String(token)).digest('hex').slice(0, 6).toUpperCase();
 
 export const DATA_COLUMNS = [
   'url', 'channel', 'feed', 'title', 'country', 'countryName', 'flag', 'quality', 'labels',
@@ -37,9 +41,11 @@ export async function callBridge(url, token, action, payload = {}, timeoutMs = 5
       : /<html/i.test(text) ? ' — kiểm tra web app đã deploy với "Who has access: Anyone" chưa' : '';
     throw new Error(`Apps Script trả về không phải JSON (HTTP ${res.status})${hint}`);
   }
-  if (data.error === 'unauthorized') {
-    throw new Error(`Apps Script báo lỗi (${action}): unauthorized — secret SHEET_BRIDGE_TOKEN không khớp token trong Sheet `
-      + '(menu IPTV Monitor → Xem bridge token → copy lại vào secret)');
+  if (String(data.error || '').startsWith('unauthorized')) {
+    const detail = String(data.error).replace(/^unauthorized:?\s*/, '') || 'token không khớp';
+    throw new Error(`Apps Script từ chối (${action}): ${detail}. GitHub đang gửi token mã ${tokenCode(token)} `
+      + `dài ${token.length} ký tự. Đối chiếu với "Mã kiểm tra" ở menu IPTV Monitor → Xem bridge token trong Sheet `
+      + '(xem docs/setup.md mục F)');
   }
   if (!data.ok) throw new Error(`Apps Script báo lỗi (${action}): ${data.error || 'không rõ'}`);
   return data;
