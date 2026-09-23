@@ -52,10 +52,11 @@ async function attempt(stream, level, o, deadline) {
     } else {
       const target = await httpCheck(stream, level, o, deadline);
       httpCode = target.status;
+      // "Slow" means the server answers slowly, so it is the HTTP time only:
+      // ffprobe's own analysis takes > 5 s even on healthy streams.
       openMs = Date.now() - t0;
       if (level === '4a' || level === '4b') {
         const info = await probe(target.probeUrl, stream, { hls: target.kind === 'hls' }, o, deadline);
-        openMs = Date.now() - t0;
         if (level === '4b') await decode(target.probeUrl, stream, info, o, deadline);
       }
     }

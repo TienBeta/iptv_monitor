@@ -35,8 +35,11 @@ describe('mức 4a / 4b (ffprobe, ffmpeg)', { skip }, () => {
   const url = (p) => `${srv.base}${p}`;
 
   test('4a: HLS có video + audio → ONLINE', async () => {
+    const t0 = Date.now();
     const r = await checkStream({ url: url('/av.m3u8') }, '4a', OPTS);
     assert.equal(r.ok, true, JSON.stringify(r));
+    // "Chậm" chỉ đo phản hồi HTTP, không tính thời gian ffprobe phân tích
+    assert.ok(r.ms < Date.now() - t0, `ms=${r.ms}`);
   });
   test('4a: master → variant thấp nhất; segment không có đuôi chuẩn vẫn đọc được', async () => {
     const before = srv.hits['/odd.m3u8'] || 0;

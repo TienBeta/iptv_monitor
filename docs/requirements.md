@@ -92,7 +92,7 @@ Khi check chỉ gửi `url`, `referrer` (header `Referer`), `user_agent` (header
 
 - Header: `Referer` khi có `referrer`; `User-Agent` = `user_agent` của stream, nếu không có thì dùng UA Chrome.
 - Timeout: kết nối 4 s; 10 s/request; tối đa 30 s/stream (đã gồm retry).
-- SLOW: tổng thời gian > 5 s (mức 4: chỉ tính thời gian đến khi ffprobe mở xong, không tính bước decode).
+- SLOW: thời gian máy chủ phản hồi HTTP (playlist, variant, segment) > 5 s. Ở mức 4a/4b **không** tính thời gian ffprobe/ffmpeg phân tích — chạy thật 84 link VN cho thấy ffprobe thường mất > 5 s kể cả với stream tốt (42/68 link bị gắn “Chậm” nếu tính vào).
 - Mức 4a/4b: check HTTP như mức 2 trước; ffprobe chỉ mở variant bitrate thấp nhất, đọc ít dữ liệu (`probesize` 500 KB).
 - HLS mã hoá (`#EXT-X-KEY`): mức 3 bỏ kiểm tra byte đầu.
 - DASH ở mức 3 = mức 2.
