@@ -1,0 +1,11 @@
+{
+  "name": "iptv-monitor",
+  "private": true,
+  "type": "module",
+  "description": "Kiểm tra stream iptv-org định kỳ bằng GitHub Actions, lưu vào Google Sheet, hiển thị trên GitHub Pages",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "node --test \"checker/test/*.test.js\"",
+    "check": "node checker/index.js"
+  }
+}

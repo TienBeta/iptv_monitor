@@ -1,0 +1,77 @@
+# Kiểm tra stream theo lịch (mỗi 3 giờ) hoặc khi bấm "Chạy ngay" trong Google Sheet.
+name: IPTV check
+
+on:
+  schedule:
+    - cron: '17 */3 * * *' # UTC → 01:17, 04:17, 07:17, ... giờ Việt Nam
+  workflow_dispatch:
+
+# Mỗi lúc chỉ một lần chạy; lần mới xếp hàng chờ, không huỷ lần đang chạy.
+concurrency:
+  group: iptv-check
+  cancel-in-progress: false
+
+permissions:
+  contents: write # đẩy dashboard + results.json lên nhánh gh-pages
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04 # ffmpeg 6.1 từ apt — đúng bản đã test
+    timeout-minutes: 170
+    steps:
+      - name: Kiểm tra cấu hình
+        id: cfg
+        env:
+          BRIDGE_URL: ${{ secrets.SHEET_BRIDGE_URL }}
+          BRIDGE_TOKEN: ${{ secrets.SHEET_BRIDGE_TOKEN }}
+        run: |
+          if [ -n "$BRIDGE_URL" ] && [ -n "$BRIDGE_TOKEN" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "::warning::Chưa có secret SHEET_BRIDGE_URL / SHEET_BRIDGE_TOKEN — bỏ qua lần chạy này (xem docs/setup.md)."
+          echo "ready=false" >> "$GITHUB_OUTPUT"
+          # Chạy tay mà thiếu cấu hình thì báo lỗi rõ ràng; chạy theo lịch thì bỏ qua êm.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then exit 1; fi
+
+      - uses: actions/checkout@v5
+        if: steps.cfg.outputs.ready == 'true'
+
+      - uses: actions/setup-node@v5
+        if: steps.cfg.outputs.ready == 'true'
+        with:
+          node-version: 24
+
+      - name: Cài ffmpeg (cho mức 4a/4b và link rtmp/rtsp/srt)
+        if: steps.cfg.outputs.ready == 'true'
+        run: |
+          if ! command -v ffprobe > /dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq --no-install-recommends ffmpeg > /dev/null
+          fi
+          ffprobe -version | head -1
+
+      - name: Kiểm tra stream
+        if: steps.cfg.outputs.ready == 'true'
+        env:
+          SHEET_BRIDGE_URL: ${{ secrets.SHEET_BRIDGE_URL }}
+          SHEET_BRIDGE_TOKEN: ${{ secrets.SHEET_BRIDGE_TOKEN }}
+          UV_THREADPOOL_SIZE: '64'
+        run: node checker/index.js
+
+      - name: Đăng dashboard lên gh-pages
+        if: always() && steps.cfg.outputs.ready == 'true' && hashFiles('dist/results.json') != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p public
+          cp -r site/. public/
+          cp dist/results.json public/
+          touch public/.nojekyll
+          cd public
+          git init -q -b gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Cập nhật kết quả $(date -u +'%Y-%m-%d %H:%M UTC')"
+          git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages

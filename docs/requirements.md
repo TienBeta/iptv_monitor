@@ -30,7 +30,7 @@ GitHub Pages (dashboard tiếng Việt, đọc results.json)
 | FR7 | Cập nhật trạng thái, ngưỡng 2 lần fail liên tiếp → Không hoạt động; 1 lần thành công → Hoạt động. |
 | FR8 | Ghi kết quả vào Sheet theo batch (sheet `Streams` cho MKT, sheet ẩn `_data` cho logic) + khối "Lần chạy gần nhất". |
 | FR9 | Xuất `results.json` lên nhánh `gh-pages`; dashboard tiếng Việt đọc file này. Sheet giữ private. |
-| FR10 | Chạy theo cron mỗi 3h; menu **IPTV Monitor → Chạy ngay** trong Sheet gọi GitHub API để chạy ngay. |
+| FR10 | Chạy theo cron mỗi 3h; chạy tay bằng ô tick **Chạy ngay** trong `Config` hoặc menu **IPTV Monitor → Chạy ngay** (Apps Script gọi GitHub API). |
 | FR11 | Sửa `Config` hoặc `Exclude` → tự chạy lại sau ~1 phút (gom nhiều lần sửa thành 1 lần chạy). |
 | FR12 | API iptv-org lỗi → giữ danh sách cũ, báo `SOURCE_ERROR`, vẫn check danh sách cũ. |
 
@@ -39,7 +39,9 @@ GitHub Pages (dashboard tiếng Việt, đọc results.json)
 - Không cài gì trên máy; setup hoàn toàn trên trình duyệt (GitHub, Google Sheets).
 - Chi phí 0đ (repo public → GitHub Actions + Pages miễn phí).
 - Mỗi lần chạy có ngân sách 150 phút; quá thì dừng, lưu phần đã check, lần sau ưu tiên stream lâu chưa check nhất. Không chạy chồng nhau.
-- Lịch sự với server stream: tối đa ~30 check song song, tối đa 3 kết nối/host.
+- Song song: tối đa 150 check (mức 1–3) / 60 check (mức 4a, 4b). Mỗi host tối đa 3 kết nối; host có > 100 link trong lần chạy được 9 kết nối.
+- Ngắt sớm host chết: 3 lỗi kết nối liên tiếp (DNS, từ chối kết nối, hết thời gian kết nối, TLS) trên cùng host → các stream còn lại của host đó nhận cùng lỗi, không check.
+- Host nhiều link được bắt đầu trước; trong mỗi host, stream lâu chưa check nhất đi trước.
 - Ghi Sheet theo batch (vài request/lần chạy), không ghi từng ô.
 - Bảo mật: token chỉ nằm trong GitHub Secrets và Script Properties của Apps Script; log Actions che query string của URL; không in secret ra log. URL stream hiển thị công khai trên dashboard (đã chấp nhận).
 - Code Node.js LTS, không dependency ngoài, dễ đọc.
@@ -86,11 +88,12 @@ Khi check chỉ gửi `url`, `referrer` (header `Referer`), `user_agent` (header
 | 2 | Như 1 + nội dung hợp lệ. HLS: `#EXTM3U` + `#EXTINF`; master playlist → vào variant bitrate thấp nhất. DASH: chứa `<MPD` |
 | 3 | Như 2 + GET segment cuối playlist với `Range` (vài KB), byte đầu hợp lệ (TS `0x47`, fMP4, ID3, ADTS) |
 | 4a | ffprobe mở được và thấy ≥ 1 track video/audio |
-| 4b | Như 4a + decode 5 giây ra frame |
+| 4b | Như 4a + decode được 1 khung hình chính (keyframe); stream chỉ có tiếng thì decode 1 frame âm thanh |
 
 - Header: `Referer` khi có `referrer`; `User-Agent` = `user_agent` của stream, nếu không có thì dùng UA Chrome.
-- Timeout: 10 s/request, tối đa 30 s/stream (đã gồm retry).
-- SLOW: tổng thời gian > 5 s (mức 4: chỉ tính thời gian mở stream, không tính 5 s decode).
+- Timeout: kết nối 4 s; 10 s/request; tối đa 30 s/stream (đã gồm retry).
+- SLOW: tổng thời gian > 5 s (mức 4: chỉ tính thời gian đến khi ffprobe mở xong, không tính bước decode).
+- Mức 4a/4b: check HTTP như mức 2 trước; ffprobe chỉ mở variant bitrate thấp nhất, đọc ít dữ liệu (`probesize` 500 KB).
 - HLS mã hoá (`#EXT-X-KEY`): mức 3 bỏ kiểm tra byte đầu.
 - DASH ở mức 3 = mức 2.
 - rtmp / rtsp / mmsh / srt: luôn check bằng ffprobe.
@@ -127,6 +130,8 @@ Khi check chỉ gửi `url`, `referrer` (header `Referer`), `user_agent` (header
 | `INVALID_MEDIA` | Dữ liệu không phải video |
 | `NO_MEDIA_STREAM` | Không tìm thấy hình/tiếng |
 | `DECODE_ERROR` | Không giải mã được video |
+| `INVALID_URL` | Link không hợp lệ |
+| `UNSUPPORTED_PROTOCOL` | Giao thức không hỗ trợ |
 | `UNKNOWN_ERROR` | Lỗi không xác định |
 
 ### Sheet `Streams` (MKT xem, script ghi đè mỗi lần chạy)
@@ -152,14 +157,14 @@ sắp xếp; nhãn "Giới hạn quốc gia" / "Không phát 24/7"; giờ Việt
 ## 7. Schedule
 
 - Cron `17 */3 * * *` (UTC) = 01:17, 04:17, 07:17, 10:17, 13:17, 16:17, 19:17, 22:17 giờ VN. Có thể trễ 5–30 phút.
-- Chạy tay: menu **IPTV Monitor → Chạy ngay** trong Sheet (hoặc nút Run workflow trên GitHub).
+- Chạy tay: tick ô **Chạy ngay** trong `Config`, menu **IPTV Monitor → Chạy ngay**, hoặc nút Run workflow trên GitHub.
 - Sửa `Config` / `Exclude` → tự chạy sau ~1 phút.
 
 ## 8. Error handling
 
 | Lỗi | Retry |
 |---|---|
-| `TIMEOUT`, `CONNECTION_ERROR`, `HTTP_5XX`, `HTTP_429` | 1 lần sau 3 s, trong ngân sách 30 s/stream |
+| `TIMEOUT`, `CONNECTION_ERROR`, `HTTP_5XX`, `HTTP_429` | 1 lần sau 3 s, trong ngân sách 30 s/stream — **trừ** stream đang `OFFLINE` (không retry) |
 | `HTTP_403`/`404`/`4XX`, `DNS_ERROR`, `TLS_ERROR`, lỗi nội dung/media | Không |
 
 - API không tải được / JSON lỗi / rỗng → `SOURCE_ERROR`, giữ danh sách cũ, vẫn check.
@@ -176,7 +181,14 @@ sắp xếp; nhãn "Giới hạn quốc gia" / "Không phát 24/7"; giờ Việt
 | Google Sheets | 10 triệu ô/file | 17.5k stream × ~24 cột ≈ 420k ô |
 | GitHub Pages | Site ≤ 1 GB; ~100 GB/tháng | `results.json`: VN ~50 KB, toàn bộ ~5 MB |
 
-## 10. Ngoài phạm vi v1
+## 10. Quyền truy cập
+
+- MKT có quyền **Editor** trên Sheet (tự sửa `Config`, `Exclude`).
+- Chấp nhận: Editor mở được Apps Script và xem được token trong Script Properties. GitHub token chỉ có quyền
+  Actions trên repo này (tệ nhất: chạy/huỷ workflow); bridge token chỉ đọc/ghi được chính Sheet này.
+- Sheet `Streams` khoá dạng cảnh báo (MKT vẫn lọc/sắp xếp được, sửa sẽ bị ghi đè); `_data` ẩn và khoá hẳn.
+
+## 11. Ngoài phạm vi v1
 
 Thông báo; lịch sử chi tiết / uptime %; stream riêng có credential; check từ IP Việt Nam;
 tự chuyển sang URL dự phòng; hiển thị codec.

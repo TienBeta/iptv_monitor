@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>IPTV Monitor</title>
+  <meta name="description" content="Tình trạng các kênh IPTV, cập nhật tự động mỗi 3 giờ">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='3' width='14' height='9' rx='2' fill='%230ca30c'/%3E%3Crect x='5' y='13' width='6' height='1.5' rx='.75' fill='%230ca30c'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="wrap">
+    <header class="top">
+      <h1>IPTV Monitor</h1>
+      <p class="meta" id="meta">Đang tải dữ liệu…</p>
+      <p class="scope" id="scope"></p>
+    </header>
+
+    <div id="banner" class="banner" role="status" hidden></div>
+
+    <section class="tiles" id="tiles" aria-label="Tổng hợp"></section>
+
+    <section class="controls" aria-label="Bộ lọc">
+      <input id="q" type="search" placeholder="Tìm tên kênh hoặc link…" aria-label="Tìm tên kênh hoặc link" autocomplete="off">
+      <select id="status" aria-label="Lọc theo trạng thái"></select>
+      <select id="country" aria-label="Lọc theo quốc gia"></select>
+      <span id="count" class="count" aria-live="polite"></span>
+    </section>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th scope="col"><button type="button" data-sort="title">Tên kênh</button></th>
+            <th scope="col"><button type="button" data-sort="countryName">Quốc gia</button></th>
+            <th scope="col"><button type="button" data-sort="status">Trạng thái</button></th>
+            <th scope="col"><button type="button" data-sort="lastChecked">Kiểm tra lúc</button></th>
+            <th scope="col">Link</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <p id="empty" class="empty" hidden>Không có kênh nào khớp bộ lọc.</p>
+    <button id="more" class="more" type="button" hidden></button>
+
+    <footer class="foot">
+      Dữ liệu kênh từ <a href="https://github.com/iptv-org/iptv" rel="noopener">iptv-org</a>.
+      Máy kiểm tra đặt ở Mỹ, nên kênh có nhãn “Giới hạn quốc gia” có thể báo lỗi dù xem ở Việt Nam vẫn được.
+    </footer>
+  </main>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>

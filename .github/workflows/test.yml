@@ -1,0 +1,25 @@
+# Chạy unit test + integration test mỗi khi có code mới.
+name: Tests
+
+on:
+  push:
+    branches-ignore: [gh-pages]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04 # ffmpeg 6.1 từ apt — đúng bản đã test
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Cài ffmpeg (test mức 4a/4b)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends ffmpeg > /dev/null
+      - run: npm test
