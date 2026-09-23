@@ -68,12 +68,12 @@ class FakeRange {
   protect() { const p = new FakeProtection('RANGE'); this.sheet.protections.push(p); return p; }
   setFontWeight() { return this; }
   setFontSize() { return this; }
-  setBackground() { return this; }
+  setBackground(c) { this.sheet.backgrounds[`${this.row},${this.col}`] = c; return this; }
 }
 
 class FakeSheet {
   constructor(name, ctx) {
-    Object.assign(this, { name, ctx, cells: [], maxRows: 1000, maxCols: 26, hidden: false, filter: null, protections: [], formats: [], links: {} });
+    Object.assign(this, { name, ctx, cells: [], maxRows: 1000, maxCols: 26, hidden: false, filter: null, protections: [], formats: [], links: {}, backgrounds: {} });
   }
   getName() { return this.name; }
   get(r, c) { const v = this.cells[r - 1]?.[c - 1]; return v === undefined ? '' : v; }

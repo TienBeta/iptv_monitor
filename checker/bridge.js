@@ -37,6 +37,10 @@ export async function callBridge(url, token, action, payload = {}, timeoutMs = 5
       : /<html/i.test(text) ? ' — kiểm tra web app đã deploy với "Who has access: Anyone" chưa' : '';
     throw new Error(`Apps Script trả về không phải JSON (HTTP ${res.status})${hint}`);
   }
+  if (data.error === 'unauthorized') {
+    throw new Error(`Apps Script báo lỗi (${action}): unauthorized — secret SHEET_BRIDGE_TOKEN không khớp token trong Sheet `
+      + '(menu IPTV Monitor → Xem bridge token → copy lại vào secret)');
+  }
   if (!data.ok) throw new Error(`Apps Script báo lỗi (${action}): ${data.error || 'không rõ'}`);
   return data;
 }

@@ -40,7 +40,9 @@ Sheet giờ có: `Config`, `Exclude`, `Streams` và `_data` (ẩn).
 3. Điền:
    - Description: `bridge`
    - Execute as: **Me (email của bạn)**
-   - Who has access: **Anyone (Bất kỳ ai)** ← bắt buộc, GitHub không đăng nhập Google được. Mọi request vẫn phải có đúng bridge token.
+   - Who has access: **Anyone (Bất kỳ ai)** ← bắt buộc, GitHub không đăng nhập Google được (để *Only myself* sẽ luôn lỗi 401).
+     “Anyone” chỉ áp dụng cho link web app, **Sheet vẫn private**. Không có bridge token thì không đọc/ghi được gì;
+     script có `@OnlyCurrentDoc` nên chỉ đụng được chính Sheet này.
 4. **Deploy** → cho phép quyền nếu được hỏi → copy **Web app URL** (dạng `https://script.google.com/macros/s/…/exec`). Dùng ở bước B3.
 
 > Kiểm tra nhanh: dán Web app URL vào trình duyệt → phải thấy `{"ok":true,"service":"iptv-monitor"}`.
@@ -92,8 +94,9 @@ Sheet giờ có: `Config`, `Exclude`, `Streams` và `_data` (ẩn).
 **C2. Chạy.** Tick ô **B7 “Chạy ngay”**. Ô C7 báo *“Đã gửi yêu cầu chạy lúc …”*.
 (Hoặc trên GitHub: tab **Actions → IPTV check → Run workflow → main → Run workflow**.)
 
-**C3. Theo dõi.** Ngay trong sheet `Config`, dòng 8 **Tiến trình** tự cập nhật mỗi phút:
-*Đang chờ GitHub bắt đầu chạy…* → *Đang chạy… (đã N phút)* → *✓ Xong lúc …* hoặc *✗ Lỗi lúc …*.
+**C3. Theo dõi.** Ngay trong sheet `Config`, dòng 8 **Trạng thái** tự cập nhật mỗi phút:
+*⏳ Đang chờ GitHub bắt đầu chạy…* → *⏳ Đang chạy… (đã N phút)* (nền vàng) → *✓ Xong lúc …* (nền xanh) hoặc *✗ Lỗi lúc …* (nền đỏ).
+Khi đang ⏳, tick “Chạy ngay” sẽ bị từ chối (kể cả khi đang chạy theo lịch 3 giờ) để không tạo nhiều lần chạy chồng nhau.
 Ô C8 **Xem chi tiết trên GitHub** mở đúng lần chạy đó (phần **Summary** có bảng số link theo trạng thái; nếu lỗi, log ghi rõ nguyên nhân).
 Phạm vi VN thường xong sau khoảng 2–3 phút.
 
@@ -115,7 +118,7 @@ Khoảng 1–2 phút sau mở <https://tienbeta.github.io/iptv_monitor/>.
 2. Gửi link dashboard: <https://tienbeta.github.io/iptv_monitor/>.
 3. Hướng dẫn MKT (3 dòng):
    - Chỉ sửa **ô vàng B3–B6** trong `Config` và sheet `Exclude`. Sửa xong hệ thống **tự chạy lại sau 1–2 phút**.
-   - Muốn chạy ngay: **tick ô B7**. Không cần dùng menu.
+   - Muốn chạy ngay: **tick ô B7**, rồi xem ô **Trạng thái** (dòng 8). Đang ⏳ thì chưa bấm lại được — đợi ✓ Xong.
    - Sheet `Streams` tự cập nhật mỗi 3 giờ; lọc/sắp xếp thoải mái, nhưng sửa tay sẽ bị ghi đè.
 
 > **Lưu ý bảo mật:** người có quyền Editor mở được Apps Script và xem được 2 token.
@@ -145,7 +148,7 @@ Khoảng 1–2 phút sau mở <https://tienbeta.github.io/iptv_monitor/>.
 | “Apps Script trả về không phải JSON (HTTP 401)” | GitHub bị Google bắt đăng nhập: web app không để **Anyone**, hoặc URL trong secret là bản `/dev` | Apps Script → **Deploy → Manage deployments** → bút chì → *Who has access*: **Anyone** → Version: **New version** → **Deploy**. Kiểm tra secret `SHEET_BRIDGE_URL` kết thúc bằng `/exec`. Thử: mở URL trong cửa sổ ẩn danh phải thấy `{"ok":true,…}` mà không phải đăng nhập |
 | Danh sách *Who has access* không có **Anyone** (chỉ có “Anyone within <công ty>” / “Anyone with Google account”) | Tài khoản Google Workspace công ty bị admin chặn chia sẻ ra ngoài | Nhờ admin cho phép, hoặc tạo Sheet + Apps Script bằng tài khoản Gmail cá nhân rồi chia sẻ Sheet cho MKT |
 | “Apps Script trả về không phải JSON … Who has access: Anyone” | Web app deploy sai quyền truy cập | Làm lại A5 với **Anyone** |
-| “Apps Script báo lỗi (load): unauthorized” | Bridge token trong secret không khớp | **IPTV Monitor → Xem bridge token** → cập nhật secret `SHEET_BRIDGE_TOKEN` |
+| “Apps Script báo lỗi (load): unauthorized” | Secret `SHEET_BRIDGE_TOKEN` khác token trong Sheet (copy thiếu/nhầm, hoặc URL web app thuộc một Sheet khác) | Trong **đúng Sheet này**: **IPTV Monitor → Xem bridge token** → copy cả 64 ký tự → GitHub secret `SHEET_BRIDGE_TOKEN` → **Update** → dán → chạy lại. Kiểm tra `SHEET_BRIDGE_URL` lấy từ **Manage deployments** của chính Sheet này |
 | “chưa có sheet Config” | Chưa chạy **Cài đặt ban đầu** | Làm A4 |
 | C7 báo “không tìm thấy workflow check.yml trên nhánh main” | Code chưa ở `main` | Làm B1 |
 | C7 báo “GitHub token sai hoặc đã hết hạn” / “thiếu quyền” | Token hết hạn hoặc thiếu quyền Actions | Làm lại B4 |

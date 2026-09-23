@@ -1,4 +1,6 @@
 /**
+ * @OnlyCurrentDoc  Script chỉ được truy cập chính Google Sheet này, không đụng tới file khác trong Drive.
+ *
  * IPTV Monitor — Apps Script gắn với Google Sheet.
  *
  * - Web app (doPost): GitHub Actions đọc cấu hình + trạng thái cũ ("load")
@@ -18,7 +20,9 @@ const SHEET = { config: 'Config', exclude: 'Exclude', streams: 'Streams', data: 
 const CELL = { runNow: 'B7', message: 'C7' };
 const INPUT_FIRST_ROW = 3; // B3:B6 = Quốc gia, Ngôn ngữ, Thể loại, Mức kiểm tra
 const INPUT_LAST_ROW = 6;
-const PROGRESS_ROW = 8; // A8 "Tiến trình", B8 trạng thái, C8 link GitHub
+const PROGRESS_ROW = 8; // A8 "Trạng thái", B8 trạng thái lần chạy, C8 link GitHub
+const STATE_COLORS = { busy: '#fff4cc', ok: '#d9f2e3', error: '#f8d4d4', idle: '#ffffff' };
+const JUST_SENT_MS = 2 * 60 * 1000; // after a dispatch, GitHub may take a few seconds to list the run
 const SUMMARY_ROW = 10;
 const ACTIONS_URL = 'https://github.com/' + GITHUB_REPO + '/actions/workflows/' + WORKFLOW_FILE;
 const WATCH_MAX_MS = 3 * 60 * 60 * 1000;
@@ -53,7 +57,7 @@ function onOpen() {
 }
 
 function runNow() {
-  const msg = dispatchSafe_();
+  const msg = requestRun_();
   setMessage_(msg);
   SpreadsheetApp.getActive().toast(msg, 'IPTV Monitor', 8);
 }
@@ -114,7 +118,7 @@ function setupConfigSheet_(ss) {
     ]);
     sh.getRange('A9').setValue('LẦN CHẠY GẦN NHẤT');
   }
-  if (sh.getRange(PROGRESS_ROW, 1).getValue() === '') sh.getRange(PROGRESS_ROW, 1).setValue('Tiến trình');
+  if (sh.getRange(PROGRESS_ROW, 2).getValue() === '') setProgress_('Sẵn sàng', ACTIONS_URL, 'idle');
   sh.getRange('B6').setDataValidation(SpreadsheetApp.newDataValidation()
     .requireValueInList(LEVEL_OPTIONS, true).setAllowInvalid(false).build());
   sh.getRange(CELL.runNow).insertCheckboxes();
@@ -202,7 +206,7 @@ function onConfigEdit(e) {
         range.getRow() === box.getRow() && range.getColumn() === box.getColumn()) {
       if (box.getValue() === true) {
         box.setValue(false);
-        setMessage_(dispatchSafe_());
+        setMessage_(requestRun_());
       }
       return;
     }
@@ -226,9 +230,26 @@ function scheduleRun_() {
   ScriptApp.newTrigger('scheduledRun').timeBased().after(60 * 1000).create();
 }
 
+// Config changed: always queue one run (GitHub runs it after the current one),
+// so the new settings are applied even if a run is in progress.
 function scheduledRun() {
   deleteTriggers_('scheduledRun');
-  setMessage_(dispatchSafe_());
+  const busy = activeRun_();
+  const msg = dispatchSafe_();
+  setMessage_(busy && msg.indexOf('Đã gửi') === 0
+    ? 'Cấu hình đã đổi — sẽ chạy lại ngay sau lần chạy hiện tại.'
+    : msg);
+}
+
+// "Chạy ngay": refused while a run is queued or running (manual or scheduled),
+// so repeated clicks never pile up runs.
+function requestRun_() {
+  const active = activeRun_();
+  if (active) {
+    watchRun_(active);
+    return 'Đang có một lần chạy — đợi dòng "Trạng thái" báo Xong rồi hãy bấm lại.';
+  }
+  return dispatchSafe_();
 }
 
 function deleteTriggers_(handler) {
@@ -246,10 +267,10 @@ function dispatchSafe_() {
   try {
     startWatch_();
   } catch (err) {
-    setProgress_('Không theo dõi được tiến trình: ' + err.message, ACTIONS_URL);
+    setProgress_('Không theo dõi được trạng thái: ' + err.message, ACTIONS_URL, 'error');
   }
   return 'Đã gửi yêu cầu chạy lúc ' + Utilities.formatDate(new Date(), 'Asia/Ho_Chi_Minh', 'HH:mm dd/MM/yyyy') +
-    '. Xem dòng "Tiến trình" bên dưới.';
+    '. Xem dòng "Trạng thái" bên dưới.';
 }
 
 function dispatchWorkflow_() {
@@ -284,49 +305,95 @@ function githubError_(res) {
   return new Error('GitHub trả về ' + code + ': ' + res.getContentText().slice(0, 200));
 }
 
-// ---------------------------------------------------------------- progress (dòng 8 của Config)
+// ---------------------------------------------------------------- status (dòng 8 của Config)
+
+// Returns the run that is queued/running now, or null. Reads GitHub, so it also
+// sees the scheduled runs. Right after a dispatch GitHub may not list the new
+// run yet: the pending watch covers that gap.
+function activeRun_() {
+  let runs;
+  try {
+    runs = recentRuns_();
+  } catch (err) {
+    return null; // e.g. no token yet: let the dispatch report the problem
+  }
+  const active = runs.find(function (r) { return r.status !== 'completed'; });
+  if (active) return active;
+  const watch = readWatch_();
+  if (watch && !watch.runId && Date.now() - watch.since < JUST_SENT_MS &&
+      !runs.some(function (r) { return createdAt_(r) >= watch.since - 60 * 1000; })) {
+    return { status: 'queued', html_url: ACTIONS_URL };
+  }
+  return null;
+}
 
 // After "Chạy ngay": check GitHub every minute and mirror the run's status.
 function startWatch_() {
-  PropertiesService.getScriptProperties().setProperty('RUN_WATCH', JSON.stringify({ since: Date.now() }));
-  setProgress_('Đang chờ GitHub bắt đầu chạy…', ACTIONS_URL);
-  const watching = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'watchRun'; });
-  if (!watching) ScriptApp.newTrigger('watchRun').timeBased().everyMinutes(1).create();
+  saveWatch_({ since: Date.now() });
+  setProgress_('⏳ Đang chờ GitHub bắt đầu chạy…', ACTIONS_URL, 'busy');
+  ensureWatchTrigger_();
+}
+
+// Follow a run that is already known (e.g. a scheduled run found in progress).
+function watchRun_(run) {
+  const watch = { since: run.created_at ? createdAt_(run) : Date.now() };
+  if (run.id) watch.runId = run.id;
+  saveWatch_(watch);
+  showRun_(run);
+  ensureWatchTrigger_();
 }
 
 function watchRun() {
-  const watch = JSON.parse(PropertiesService.getScriptProperties().getProperty('RUN_WATCH') || 'null');
+  const watch = readWatch_();
   if (!watch || Date.now() - watch.since > WATCH_MAX_MS) {
     stopWatch_();
     return;
   }
-  let run;
+  let runs;
   try {
-    run = latestRun_(watch.since);
+    runs = recentRuns_();
   } catch (err) {
-    setProgress_('Không đọc được trạng thái từ GitHub: ' + err.message, ACTIONS_URL);
+    setProgress_('Không đọc được trạng thái từ GitHub: ' + err.message, ACTIONS_URL, 'error');
     return;
   }
+  const run = watch.runId
+    ? runs.find(function (r) { return r.id === watch.runId; })
+    : runs.find(function (r) { return createdAt_(r) >= watch.since - 60 * 1000; });
   if (!run) {
     if (Date.now() - watch.since > 15 * 60 * 1000) {
-      setProgress_('GitHub chưa bắt đầu chạy sau 15 phút — bấm link bên cạnh để xem', ACTIONS_URL);
+      setProgress_('GitHub chưa bắt đầu chạy sau 15 phút — bấm link bên cạnh để xem', ACTIONS_URL, 'error');
       stopWatch_();
     }
     return;
   }
+  if (!watch.runId && run.id) {
+    watch.runId = run.id;
+    saveWatch_(watch);
+  }
+  showRun_(run);
+  if (run.status === 'completed') stopWatch_();
+}
+
+function showRun_(run) {
   if (run.status !== 'completed') {
-    const started = new Date(run.run_started_at || run.created_at);
-    const minutes = Math.max(0, Math.round((Date.now() - started.getTime()) / 60000));
-    setProgress_(run.status === 'in_progress'
-      ? 'Đang chạy… (bắt đầu ' + hhmm_(started) + ', đã ' + minutes + ' phút)'
-      : 'Đang chờ GitHub bắt đầu chạy…', run.html_url);
+    if (run.status === 'in_progress') {
+      const started = new Date(run.run_started_at || run.created_at);
+      const minutes = Math.max(0, Math.round((Date.now() - started.getTime()) / 60000));
+      setProgress_('⏳ Đang chạy… (bắt đầu ' + hhmm_(started) + ', đã ' + minutes + ' phút)', run.html_url, 'busy');
+    } else {
+      setProgress_('⏳ Đang chờ GitHub bắt đầu chạy…', run.html_url, 'busy');
+    }
     return;
   }
   const at = hhmm_(new Date(run.updated_at || Date.now()));
-  if (run.conclusion === 'success') setProgress_('✓ Xong lúc ' + at + ' — xem kết quả ở sheet Streams', run.html_url);
-  else if (run.conclusion === 'cancelled') setProgress_('Đã huỷ lúc ' + at, run.html_url);
-  else setProgress_('✗ Lỗi lúc ' + at + ' — bấm link bên cạnh để xem nguyên nhân', run.html_url);
-  stopWatch_();
+  if (run.conclusion === 'success') setProgress_('✓ Xong lúc ' + at + ' — có thể bấm Chạy ngay lại', run.html_url, 'ok');
+  else if (run.conclusion === 'cancelled') setProgress_('Đã huỷ lúc ' + at, run.html_url, 'idle');
+  else setProgress_('✗ Lỗi lúc ' + at + ' — bấm link bên cạnh để xem nguyên nhân', run.html_url, 'error');
+}
+
+function ensureWatchTrigger_() {
+  const watching = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'watchRun'; });
+  if (!watching) ScriptApp.newTrigger('watchRun').timeBased().everyMinutes(1).create();
 }
 
 function stopWatch_() {
@@ -334,18 +401,30 @@ function stopWatch_() {
   deleteTriggers_('watchRun');
 }
 
-// The dispatch API returns no run id: take the newest manual run created after the request.
-function latestRun_(since) {
-  const res = githubFetch_('/actions/workflows/' + WORKFLOW_FILE + '/runs?event=workflow_dispatch&per_page=5');
-  if (res.getResponseCode() !== 200) throw githubError_(res);
-  const runs = JSON.parse(res.getContentText()).workflow_runs || [];
-  return runs.find(function (r) { return new Date(r.created_at).getTime() >= since - 60 * 1000; }) || null;
+function readWatch_() {
+  return JSON.parse(PropertiesService.getScriptProperties().getProperty('RUN_WATCH') || 'null');
 }
 
-function setProgress_(text, url) {
+function saveWatch_(watch) {
+  PropertiesService.getScriptProperties().setProperty('RUN_WATCH', JSON.stringify(watch));
+}
+
+// Newest first, manual and scheduled runs alike.
+function recentRuns_() {
+  const res = githubFetch_('/actions/workflows/' + WORKFLOW_FILE + '/runs?per_page=5');
+  if (res.getResponseCode() !== 200) throw githubError_(res);
+  return JSON.parse(res.getContentText()).workflow_runs || [];
+}
+
+function createdAt_(run) {
+  return new Date(run.created_at).getTime();
+}
+
+function setProgress_(text, url, tone) {
   const sh = SpreadsheetApp.getActive().getSheetByName(SHEET.config);
   if (!sh) return;
-  sh.getRange(PROGRESS_ROW, 1, 1, 2).setValues([['Tiến trình', text]]);
+  sh.getRange(PROGRESS_ROW, 1, 1, 2).setValues([['Trạng thái', text]]);
+  sh.getRange(PROGRESS_ROW, 2).setBackground(STATE_COLORS[tone] || STATE_COLORS.idle).setFontWeight('bold');
   const link = SpreadsheetApp.newRichTextValue().setText('Xem chi tiết trên GitHub').setLinkUrl(url || ACTIONS_URL).build();
   sh.getRange(PROGRESS_ROW, 3).setRichTextValue(link);
 }
@@ -369,7 +448,7 @@ function doPost(e) {
   try {
     const req = JSON.parse((e && e.postData && e.postData.contents) || '{}');
     const expected = PropertiesService.getScriptProperties().getProperty('BRIDGE_TOKEN');
-    if (!expected || req.token !== expected) return json_({ ok: false, error: 'unauthorized' });
+    if (!expected || String(req.token || '').trim() !== expected.trim()) return json_({ ok: false, error: 'unauthorized' });
     if (req.action === 'load') return json_(handleLoad_());
     if (req.action === 'save') {
       const lock = LockService.getScriptLock();
