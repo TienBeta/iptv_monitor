@@ -76,11 +76,45 @@ function setGithubToken() {
   ui.alert('Đã lưu GitHub token. Thử tick ô "Chạy ngay" trong sheet Config.');
 }
 
+// Shows the token in a box with a Copy button (copying from an alert is error-prone),
+// plus its short "mã kiểm tra" to compare with the GitHub log when it says unauthorized.
 function showBridgeToken() {
   const token = PropertiesService.getScriptProperties().getProperty('BRIDGE_TOKEN');
-  alert_(token
-    ? 'Bridge token (dán vào GitHub secret SHEET_BRIDGE_TOKEN):\n\n' + token
-    : 'Chưa có token — chạy menu IPTV Monitor → Cài đặt ban đầu.');
+  if (!token) {
+    alert_('Chưa có token — chạy menu IPTV Monitor → Cài đặt ban đầu.');
+    return;
+  }
+  const url = ScriptApp.getService().getUrl() || '';
+  const html = HtmlService.createHtmlOutput(
+    '<div style="font:14px Arial,sans-serif;line-height:1.5">' +
+    '<p>Dán vào GitHub → <b>Settings → Secrets and variables → Actions</b> → secret <b>SHEET_BRIDGE_TOKEN</b>:</p>' +
+    copyBox_('t', token) +
+    '<p>Mã kiểm tra: <b>' + tokenCode_(token) + '</b> (64 ký tự)</p>' +
+    (/\/exec$/.test(url)
+      ? '<p>Web app URL của Sheet này (secret <b>SHEET_BRIDGE_URL</b>):</p>' + copyBox_('u', url)
+      : '<p>Web app URL: xem <b>Deploy → Manage deployments</b> trong Apps Script.</p>') +
+    '<script>function cp(id){var e=document.getElementById(id);e.select();' +
+    'try{navigator.clipboard.writeText(e.value)}catch(x){}document.execCommand("copy");' +
+    'document.getElementById(id+"s").textContent="Đã copy";}</script></div>',
+  ).setWidth(560).setHeight(url ? 330 : 250);
+  try {
+    SpreadsheetApp.getUi().showModalDialog(html, 'Bridge token');
+  } catch (err) {
+    Logger.log(token); // run from the editor: no UI
+  }
+}
+
+function copyBox_(id, value) {
+  const v = String(value).replace(/[&<>"]/g, function (c) { return '&#' + c.charCodeAt(0) + ';'; });
+  return '<input id="' + id + '" value="' + v + '" readonly onclick="this.select()" ' +
+    'style="width:100%;box-sizing:border-box;font:12px monospace;padding:6px">' +
+    '<button onclick="cp(\'' + id + '\')" style="margin-top:4px">Copy</button> <span id="' + id + 's"></span>';
+}
+
+// Short fingerprint of a token (first 3 bytes of SHA-256): safe to show, enough to compare.
+function tokenCode_(token) {
+  return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(token), Utilities.Charset.UTF_8)
+    .slice(0, 3).map(function (b) { return ('0' + (b & 0xff).toString(16)).slice(-2); }).join('').toUpperCase();
 }
 
 // ---------------------------------------------------------------- setup
@@ -447,8 +481,16 @@ function doGet() {
 function doPost(e) {
   try {
     const req = JSON.parse((e && e.postData && e.postData.contents) || '{}');
-    const expected = PropertiesService.getScriptProperties().getProperty('BRIDGE_TOKEN');
-    if (!expected || String(req.token || '').trim() !== expected.trim()) return json_({ ok: false, error: 'unauthorized' });
+    const expected = String(PropertiesService.getScriptProperties().getProperty('BRIDGE_TOKEN') || '').trim();
+    const given = String(req.token || '').trim();
+    if (!expected) {
+      return json_({ ok: false, error: 'unauthorized: Apps Script ở link này chưa có bridge token — link trong ' +
+        'SHEET_BRIDGE_URL không thuộc Sheet đang dùng, hoặc chưa chạy "Cài đặt ban đầu"' });
+    }
+    if (given !== expected) {
+      return json_({ ok: false, error: 'unauthorized: Sheet ở link này chờ token mã ' + tokenCode_(expected) +
+        ', nhưng nhận được ' + (given ? 'token mã ' + tokenCode_(given) + ' dài ' + given.length + ' ký tự' : 'token rỗng') });
+    }
     if (req.action === 'load') return json_(handleLoad_());
     if (req.action === 'save') {
       const lock = LockService.getScriptLock();

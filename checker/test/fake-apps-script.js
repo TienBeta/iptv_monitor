@@ -3,7 +3,7 @@
 // (setValues size mismatch, writing outside the sheet) and mimics Sheets'
 // quote-prefix handling. It is not a full emulator.
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import http from 'node:http';
 import vm from 'node:vm';
@@ -154,6 +154,7 @@ export function loadAppsScript(file = new URL('../../apps-script/Code.gs', impor
   const ss = new FakeSpreadsheet(sandbox);
   let fetchCode = 204;
   let runs = [];
+  const dialogs = [];
 
   const trigger = (handler, kind) => {
     const t = { handler, kind, getHandlerFunction: () => handler };
@@ -164,7 +165,10 @@ export function loadAppsScript(file = new URL('../../apps-script/Code.gs', impor
     SpreadsheetApp: {
       getActive: () => ss,
       getActiveSpreadsheet: () => ss,
-      getUi: () => { throw new Error('no UI in tests'); },
+      getUi: () => {
+        if (!sandbox.__ui) throw new Error('no UI in tests');
+        return { showModalDialog: (out, title) => dialogs.push({ title, html: out.html }), alert: (m) => dialogs.push({ alert: m }) };
+      },
       flush: () => {},
       newDataValidation: chain,
       newConditionalFormatRule: chain,
@@ -198,6 +202,7 @@ export function loadAppsScript(file = new URL('../../apps-script/Code.gs', impor
     },
     ScriptApp: {
       getProjectTriggers: () => [...triggers],
+      getService: () => ({ getUrl: () => 'https://script.google.com/macros/s/FAKE_ID/exec' }),
       deleteTrigger: (t) => triggers.splice(triggers.indexOf(t), 1),
       newTrigger: (handler) => ({
         timeBased: () => ({
@@ -208,7 +213,14 @@ export function loadAppsScript(file = new URL('../../apps-script/Code.gs', impor
       }),
     },
     Session: { getEffectiveUser: () => ({ getEmail: () => 'owner@example.com' }) },
+    HtmlService: {
+      createHtmlOutput: (html) => ({ html, setWidth() { return this; }, setHeight() { return this; } }),
+    },
     Utilities: {
+      DigestAlgorithm: { SHA_256: 'sha256' },
+      Charset: { UTF_8: 'utf8' },
+      // Apps Script returns signed bytes (-128..127)
+      computeDigest: (alg, value) => [...createHash(alg).update(String(value), 'utf8').digest()].map((b) => (b > 127 ? b - 256 : b)),
       getUuid: () => randomUUID(),
       formatDate: (d, _tz, fmt) => (fmt === 'HH:mm'
         ? new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(d))
@@ -227,6 +239,8 @@ export function loadAppsScript(file = new URL('../../apps-script/Code.gs', impor
     logs,
     setFetchCode: (c) => { fetchCode = c; },
     setRuns: (r) => { runs = r; },
+    dialogs,
+    withUi: () => { sandbox.__ui = true; },
     sheet: (name) => ss.getSheetByName(name),
     post: (body) => JSON.parse(sandbox.doPost({ postData: { contents: JSON.stringify(body) } }).getContent()),
     edit: (sheetName, a1) => sandbox.onConfigEdit({ range: ss.getSheetByName(sheetName).getRange(a1) }),

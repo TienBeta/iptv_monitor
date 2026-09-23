@@ -2,6 +2,7 @@
 
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
+import { tokenCode } from '../bridge.js';
 import { loadAppsScript } from './fake-apps-script.js';
 
 const isDate = (v) => Object.prototype.toString.call(v) === '[object Date]';
@@ -53,10 +54,28 @@ describe('Code.gs — cài đặt', () => {
 });
 
 describe('Code.gs — web app (load / save)', () => {
-  test('sai token → unauthorized', () => {
+  test('sai token → unauthorized, kèm mã kiểm tra hai phía (giống mã tính ở Node)', () => {
+    const { gas, token } = ready();
+    const wrong = gas.post({ token: 'wrong', action: 'load' });
+    assert.equal(wrong.ok, false);
+    assert.equal(wrong.error,
+      `unauthorized: Sheet ở link này chờ token mã ${tokenCode(token)}, nhưng nhận được token mã ${tokenCode('wrong')} dài 5 ký tự`);
+    assert.match(gas.post({ action: 'load' }).error, /nhận được token rỗng$/);
+  });
+  test('Apps Script chưa có token (link thuộc Sheet khác) → nói rõ', () => {
     const { gas } = ready();
-    assert.deepEqual(gas.post({ token: 'wrong', action: 'load' }), { ok: false, error: 'unauthorized' });
-    assert.deepEqual(gas.post({ action: 'load' }), { ok: false, error: 'unauthorized' });
+    gas.props.delete('BRIDGE_TOKEN');
+    assert.match(gas.post({ token: 'x', action: 'load' }).error, /^unauthorized: Apps Script ở link này chưa có bridge token/);
+  });
+  test('menu Xem bridge token: hộp copy token + URL /exec + mã kiểm tra', () => {
+    const { gas, token } = ready();
+    gas.withUi();
+    gas.ctx.showBridgeToken();
+    const { title, html } = gas.dialogs.at(-1);
+    assert.equal(title, 'Bridge token');
+    assert.ok(html.includes(`value="${token}"`));
+    assert.ok(html.includes('value="https://script.google.com/macros/s/FAKE_ID/exec"'));
+    assert.ok(html.includes(`Mã kiểm tra: <b>${tokenCode(token)}</b>`));
   });
   test('token dán kèm dấu cách / xuống dòng vẫn được chấp nhận', () => {
     const { gas, token } = ready();
