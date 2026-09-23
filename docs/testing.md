@@ -3,7 +3,7 @@
 Chạy toàn bộ: `npm test` (Node 22+, cần `ffmpeg` cho nhóm mức 4a/4b — CI tự cài).
 Workflow [`Tests`](../.github/workflows/test.yml) chạy lại mỗi khi có code mới.
 
-**Kết quả gần nhất:** 86/86 pass (23/09/2026, Node 22, ffmpeg 6.1.1 — cùng bản với runner Ubuntu 24.04 của GitHub).
+**Kết quả gần nhất:** 86/86 pass — trên máy phát triển (Node 22, ffmpeg 6.1.1) và trên GitHub Actions (`ubuntu-24.04`, Node 24), 23/09/2026.
 
 ## Cách test
 
@@ -56,8 +56,9 @@ Workflow [`Smoke test`](../.github/workflows/smoke.yml), phạm vi `VN` (84 link
 |---|---|---|---|---|---|
 | 3 | 23 giây | 67 | 3 | 14 | `HTTP_403` ×9 (vtvprime.vn, fptplay — chặn IP ngoài VN), `TIMEOUT` ×2, `HTTP_404` ×2, `SEGMENT_ERROR` ×1 |
 | 4b | 1 phút | 26 | 42 | 16 | như trên + `TIMEOUT` ×2 (ffprobe), `INVALID_MEDIA` ×1 |
+| 4b (sau khi sửa “Chậm”) | 49 giây | 67 | 0 | 17 | như trên; `TIMEOUT` ×4 (3 link canthotv.vn), `CONNECTION_ERROR` ×1 |
 
-- ffprobe/ffmpeg chạy được với stream thật: 68/84 link giải mã được hình, gần bằng mức 3 (70/84).
+- ffprobe/ffmpeg chạy được với stream thật: 67–68/84 link giải mã được hình, gần bằng mức 3 (70/84).
 - Phát hiện: ở mức 4b có 42 link bị gắn “Chậm” vì thời gian ffprobe phân tích bị tính vào. Đã sửa:
   “Chậm” chỉ đo thời gian máy chủ phản hồi HTTP (xem requirements mục 5).
 - Log chỉ in URL đã che query (`…/01.m3u8?…`).
