@@ -40,7 +40,9 @@ Sheet giờ có: `Config`, `Exclude`, `Streams` và `_data` (ẩn).
 3. Điền:
    - Description: `bridge`
    - Execute as: **Me (email của bạn)**
-   - Who has access: **Anyone (Bất kỳ ai)** ← bắt buộc, GitHub không đăng nhập Google được. Mọi request vẫn phải có đúng bridge token.
+   - Who has access: **Anyone (Bất kỳ ai)** ← bắt buộc, GitHub không đăng nhập Google được (để *Only myself* sẽ luôn lỗi 401).
+     “Anyone” chỉ áp dụng cho link web app, **Sheet vẫn private**. Không có bridge token thì không đọc/ghi được gì;
+     script có `@OnlyCurrentDoc` nên chỉ đụng được chính Sheet này.
 4. **Deploy** → cho phép quyền nếu được hỏi → copy **Web app URL** (dạng `https://script.google.com/macros/s/…/exec`). Dùng ở bước B3.
 
 > Kiểm tra nhanh: dán Web app URL vào trình duyệt → phải thấy `{"ok":true,"service":"iptv-monitor"}`.

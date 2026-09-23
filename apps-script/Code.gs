@@ -1,4 +1,6 @@
 /**
+ * @OnlyCurrentDoc  Script chỉ được truy cập chính Google Sheet này, không đụng tới file khác trong Drive.
+ *
  * IPTV Monitor — Apps Script gắn với Google Sheet.
  *
  * - Web app (doPost): GitHub Actions đọc cấu hình + trạng thái cũ ("load")
