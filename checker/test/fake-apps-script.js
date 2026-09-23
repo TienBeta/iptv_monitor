@@ -62,6 +62,7 @@ class FakeRange {
   }
   setNumberFormat(f) { this.sheet.formats.push({ row: this.row, col: this.col, numRows: this.numRows, format: f }); return this; }
   setDataValidation(v) { this.sheet.validation = v; return this; }
+  setRichTextValue(v) { this.setValue(v.text); this.sheet.links[`${this.row},${this.col}`] = v.url; return this; }
   insertCheckboxes() { if (this.getValue() === '') this.setValue(false); return this; }
   createFilter() { this.sheet.filter = new FakeFilter(this.sheet, this); return this.sheet.filter; }
   protect() { const p = new FakeProtection('RANGE'); this.sheet.protections.push(p); return p; }
@@ -72,7 +73,7 @@ class FakeRange {
 
 class FakeSheet {
   constructor(name, ctx) {
-    Object.assign(this, { name, ctx, cells: [], maxRows: 1000, maxCols: 26, hidden: false, filter: null, protections: [], formats: [] });
+    Object.assign(this, { name, ctx, cells: [], maxRows: 1000, maxCols: 26, hidden: false, filter: null, protections: [], formats: [], links: {} });
   }
   getName() { return this.name; }
   get(r, c) { const v = this.cells[r - 1]?.[c - 1]; return v === undefined ? '' : v; }
@@ -152,6 +153,7 @@ export function loadAppsScript(file = new URL('../../apps-script/Code.gs', impor
   sandbox.Date = vm.runInContext('Date', ctx);
   const ss = new FakeSpreadsheet(sandbox);
   let fetchCode = 204;
+  let runs = [];
 
   const trigger = (handler, kind) => {
     const t = { handler, kind, getHandlerFunction: () => handler };
@@ -166,12 +168,18 @@ export function loadAppsScript(file = new URL('../../apps-script/Code.gs', impor
       flush: () => {},
       newDataValidation: chain,
       newConditionalFormatRule: chain,
+      newRichTextValue: () => {
+        const v = {};
+        const b = { setText: (t) => { v.text = t; return b; }, setLinkUrl: (u) => { v.url = u; return b; }, build: () => v };
+        return b;
+      },
       ProtectionType: { RANGE: 'RANGE', SHEET: 'SHEET' },
     },
     PropertiesService: {
       getScriptProperties: () => ({
         getProperty: (k) => (props.has(k) ? props.get(k) : null),
         setProperty: (k, v) => props.set(k, String(v)),
+        deleteProperty: (k) => props.delete(k),
       }),
     },
     LockService: { getScriptLock: () => ({ waitLock: () => {}, releaseLock: () => {} }) },
@@ -182,6 +190,9 @@ export function loadAppsScript(file = new URL('../../apps-script/Code.gs', impor
     UrlFetchApp: {
       fetch: (url, opts) => {
         fetches.push({ url, opts });
+        if (opts.method === 'get') {
+          return { getResponseCode: () => 200, getContentText: () => JSON.stringify({ workflow_runs: runs }) };
+        }
         return { getResponseCode: () => fetchCode, getContentText: () => '{"message":"x"}' };
       },
     },
@@ -189,14 +200,19 @@ export function loadAppsScript(file = new URL('../../apps-script/Code.gs', impor
       getProjectTriggers: () => [...triggers],
       deleteTrigger: (t) => triggers.splice(triggers.indexOf(t), 1),
       newTrigger: (handler) => ({
-        timeBased: () => ({ after: () => ({ create: () => trigger(handler, 'time') }) }),
+        timeBased: () => ({
+          after: () => ({ create: () => trigger(handler, 'time') }),
+          everyMinutes: () => ({ create: () => trigger(handler, 'every') }),
+        }),
         forSpreadsheet: () => ({ onEdit: () => ({ create: () => trigger(handler, 'edit') }) }),
       }),
     },
     Session: { getEffectiveUser: () => ({ getEmail: () => 'owner@example.com' }) },
     Utilities: {
       getUuid: () => randomUUID(),
-      formatDate: (d) => new Date(d).toISOString(),
+      formatDate: (d, _tz, fmt) => (fmt === 'HH:mm'
+        ? new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(d))
+        : new Date(d).toISOString()),
     },
     Logger: { log: (m) => logs.push(m) },
   });
@@ -210,6 +226,7 @@ export function loadAppsScript(file = new URL('../../apps-script/Code.gs', impor
     fetches,
     logs,
     setFetchCode: (c) => { fetchCode = c; },
+    setRuns: (r) => { runs = r; },
     sheet: (name) => ss.getSheetByName(name),
     post: (body) => JSON.parse(sandbox.doPost({ postData: { contents: JSON.stringify(body) } }).getContent()),
     edit: (sheetName, a1) => sandbox.onConfigEdit({ range: ss.getSheetByName(sheetName).getRange(a1) }),
