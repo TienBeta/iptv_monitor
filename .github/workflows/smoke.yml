@@ -1,0 +1,37 @@
+# Chạy thử checker với stream thật, KHÔNG dùng Google Sheet:
+# không ghi Sheet, không đăng dashboard. Kết quả xem ở phần Summary của lần chạy.
+name: Smoke test
+
+on:
+  workflow_dispatch:
+    inputs:
+      countries:
+        description: 'Mã quốc gia, VD: VN hoặc VN, TH'
+        default: 'VN'
+      level:
+        description: 'Mức kiểm tra: 1, 2, 3, 4a, 4b'
+        default: '3'
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04 # ffmpeg 6.1 từ apt — đúng bản đã test
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - name: Cài ffmpeg
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends ffmpeg > /dev/null
+      - name: Kiểm tra stream (không dùng Sheet)
+        env:
+          LOCAL_MODE: '1'
+          COUNTRIES: ${{ inputs.countries }}
+          LEVEL: ${{ inputs.level }}
+          UV_THREADPOOL_SIZE: '64'
+        run: node checker/index.js

@@ -26,6 +26,7 @@ GitHub Pages — https://tienbeta.github.io/iptv_monitor/
 | `site/` | Dashboard tĩnh (HTML/CSS/JS thuần) |
 | `.github/workflows/check.yml` | Chạy mỗi 3 giờ + chạy tay; đăng dashboard |
 | `.github/workflows/test.yml` | Chạy `npm test` khi có code mới |
+| `.github/workflows/smoke.yml` | Chạy tay: kiểm tra stream thật, không cần Sheet (không ghi Sheet, không đăng dashboard) |
 
 ## Mức kiểm tra
 

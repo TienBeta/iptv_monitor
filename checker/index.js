@@ -3,7 +3,8 @@
 // results.json for the dashboard.
 //
 //   node checker/index.js                      (GitHub Actions, with secrets)
-//   COUNTRIES=VN LEVEL=3 node checker/index.js (local run, no Sheet)
+//   COUNTRIES=VN LEVEL=3 node checker/index.js (local run, no Sheet;
+//                                               LOCAL_MODE=1 inside Actions)
 
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -103,7 +104,7 @@ export async function runMonitor({ env = process.env, checkOptions = {}, io = {}
   await mkdir(outDir, { recursive: true });
 
   const bridgeUrl = env.SHEET_BRIDGE_URL;
-  if (!bridgeUrl && env.GITHUB_ACTIONS === 'true') {
+  if (!bridgeUrl && env.GITHUB_ACTIONS === 'true' && env.LOCAL_MODE !== '1') {
     throw new Error('Thiếu secret SHEET_BRIDGE_URL / SHEET_BRIDGE_TOKEN (xem docs/setup.md)');
   }
   const load = io.load || (bridgeUrl

@@ -132,6 +132,7 @@ Khoảng 1–2 phút sau mở <https://tienbeta.github.io/iptv_monitor/>.
 | Tạm dừng | Actions → IPTV check → `···` → **Disable workflow** |
 | Thấy banner “scheduled workflow is disabled” | Bấm **Enable workflow** (GitHub tắt nếu repo 60 ngày không có hoạt động; mỗi lần chạy đều push dashboard nên hiếm gặp) |
 | GitHub token hết hạn | Làm lại B4. Cron vẫn chạy bình thường, chỉ “Chạy ngay” bị ảnh hưởng |
+| Chạy thử với stream thật, không đụng tới Sheet | Actions → **Smoke test** → Run workflow → nhập quốc gia + mức → xem **Summary** |
 | Chạy thử trên máy (tuỳ chọn, cần Node 22+) | `COUNTRIES=VN LEVEL=3 node checker/index.js` → `dist/results.json`; `npm test` để chạy test |
 
 ## F. Xử lý sự cố
