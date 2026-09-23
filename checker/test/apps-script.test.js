@@ -58,6 +58,10 @@ describe('Code.gs — web app (load / save)', () => {
     assert.deepEqual(gas.post({ token: 'wrong', action: 'load' }), { ok: false, error: 'unauthorized' });
     assert.deepEqual(gas.post({ action: 'load' }), { ok: false, error: 'unauthorized' });
   });
+  test('token dán kèm dấu cách / xuống dòng vẫn được chấp nhận', () => {
+    const { gas, token } = ready();
+    assert.equal(gas.post({ token: ` ${token}\n`, action: 'load' }).ok, true);
+  });
   test('load trả cấu hình + danh sách loại trừ', () => {
     const { gas, token } = ready();
     gas.sheet('Config').getRange('B4').setValue('vie');
@@ -121,15 +125,16 @@ describe('Code.gs — Chạy ngay và tự chạy khi sửa cấu hình', () => 
     gas.props.set('GITHUB_TOKEN', 'github_pat_test');
     gas.sheet('Config').getRange('B7').setValue(true);
     gas.edit('Config', 'B7');
-    assert.equal(gas.fetches.length, 1);
-    const { url, opts } = gas.fetches[0];
+    const posts = gas.fetches.filter((f) => f.opts.method === 'post');
+    assert.equal(posts.length, 1);
+    const { url, opts } = posts[0];
     assert.equal(url, 'https://api.github.com/repos/TienBeta/iptv_monitor/actions/workflows/check.yml/dispatches');
     assert.equal(opts.method, 'post');
     assert.equal(opts.headers.Authorization, 'Bearer github_pat_test');
     assert.deepEqual(JSON.parse(opts.payload), { ref: 'main' });
     assert.equal(gas.sheet('Config').getRange('B7').getValue(), false);
     assert.match(gas.sheet('Config').getRange('C7').getValue(), /^Đã gửi yêu cầu chạy/);
-    assert.equal(gas.sheet('Config').getRange('B8').getValue(), 'Đang chờ GitHub bắt đầu chạy…');
+    assert.equal(gas.sheet('Config').getRange('B8').getValue(), '⏳ Đang chờ GitHub bắt đầu chạy…');
   });
   test('chưa có GitHub token / token sai → thông báo rõ ràng', () => {
     const { gas } = ready();
@@ -151,7 +156,7 @@ describe('Code.gs — Chạy ngay và tự chạy khi sửa cấu hình', () => 
     assert.equal(gas.triggers.filter((t) => t.handler === 'scheduledRun').length, 1);
     assert.equal(gas.fetches.length, 0);
     gas.ctx.scheduledRun();
-    assert.equal(gas.fetches.length, 1);
+    assert.equal(gas.fetches.filter((f) => f.opts.method === 'post').length, 1);
     assert.equal(gas.triggers.filter((t) => t.handler === 'scheduledRun').length, 0);
   });
   test('sửa cột hướng dẫn hoặc khối kết quả → không chạy lại', () => {
@@ -162,7 +167,7 @@ describe('Code.gs — Chạy ngay và tự chạy khi sửa cấu hình', () => 
   });
 });
 
-describe('Code.gs — dòng "Tiến trình" sau khi bấm Chạy ngay', () => {
+describe('Code.gs — ô "Trạng thái" và khoá nút Chạy ngay', () => {
   const tick = (gas) => {
     gas.sheet('Config').getRange('B7').setValue(true);
     gas.edit('Config', 'B7');
@@ -170,27 +175,66 @@ describe('Code.gs — dòng "Tiến trình" sau khi bấm Chạy ngay', () => {
   const watchers = (gas) => gas.triggers.filter((t) => t.handler === 'watchRun').length;
   const progress = (gas) => gas.sheet('Config').getRange('B8').getValue();
   const link = (gas) => gas.sheet('Config').links['8,3'];
+  const color = (gas) => gas.sheet('Config').backgrounds['8,2'];
+  const posts = (gas) => gas.fetches.filter((f) => f.opts.method === 'post').length;
   function started() {
     const { gas } = ready();
     gas.props.set('GITHUB_TOKEN', 't');
     tick(gas);
     return gas;
   }
-  const run = (extra) => ({ created_at: new Date().toISOString(), html_url: 'https://github.com/TienBeta/iptv_monitor/actions/runs/1', ...extra });
+  const run = (extra) => ({ id: 1, created_at: new Date().toISOString(), html_url: 'https://github.com/TienBeta/iptv_monitor/actions/runs/1', ...extra });
 
-  test('sau khi gửi: "Đang chờ", có link Actions, 1 trigger theo dõi (tick 2 lần vẫn 1)', () => {
+  test('setup: ô Trạng thái = "Sẵn sàng"', () => {
+    const { gas } = ready();
+    assert.equal(gas.sheet('Config').getRange('A8').getValue(), 'Trạng thái');
+    assert.equal(progress(gas), 'Sẵn sàng');
+  });
+  test('sau khi gửi: "⏳ Đang chờ" (nền vàng), có link Actions, 1 trigger theo dõi', () => {
     const gas = started();
-    assert.equal(progress(gas), 'Đang chờ GitHub bắt đầu chạy…');
-    assert.equal(gas.sheet('Config').getRange('A8').getValue(), 'Tiến trình');
+    assert.equal(progress(gas), '⏳ Đang chờ GitHub bắt đầu chạy…');
+    assert.equal(color(gas), '#fff4cc');
     assert.equal(link(gas), 'https://github.com/TienBeta/iptv_monitor/actions/workflows/check.yml');
-    tick(gas);
     assert.equal(watchers(gas), 1);
+  });
+  test('bấm lại ngay khi GitHub chưa kịp hiện lần chạy → bị chặn, không gửi thêm', () => {
+    const gas = started();
+    tick(gas);
+    tick(gas);
+    assert.equal(posts(gas), 1);
+    assert.match(gas.sheet('Config').getRange('C7').getValue(), /^Đang có một lần chạy/);
+    assert.equal(gas.sheet('Config').getRange('B7').getValue(), false);
+    assert.equal(watchers(gas), 1);
+  });
+  test('đang có lần chạy (kể cả chạy theo lịch) → bị chặn, hiện "Đang chạy" và theo dõi lần đó', () => {
+    const { gas } = ready();
+    gas.props.set('GITHUB_TOKEN', 't');
+    gas.setRuns([run({ id: 77, event: 'schedule', status: 'in_progress', run_started_at: new Date(Date.now() - 60000).toISOString() })]);
+    tick(gas);
+    assert.equal(posts(gas), 0);
+    assert.match(gas.sheet('Config').getRange('C7').getValue(), /^Đang có một lần chạy/);
+    assert.match(progress(gas), /^⏳ Đang chạy… \(bắt đầu \d\d:\d\d, đã 1 phút\)$/);
+    assert.equal(JSON.parse(gas.props.get('RUN_WATCH')).runId, 77);
+    gas.setRuns([run({ id: 77, status: 'completed', conclusion: 'success', updated_at: new Date().toISOString() })]);
+    gas.ctx.watchRun();
+    assert.match(progress(gas), /^✓ Xong lúc/);
+    tick(gas); // now allowed
+    assert.equal(posts(gas), 1);
+  });
+  test('sửa cấu hình khi đang chạy → vẫn xếp hàng 1 lần chạy để áp dụng cấu hình mới', () => {
+    const { gas } = ready();
+    gas.props.set('GITHUB_TOKEN', 't');
+    gas.setRuns([run({ status: 'in_progress', run_started_at: new Date().toISOString() })]);
+    gas.edit('Config', 'B3');
+    gas.ctx.scheduledRun();
+    assert.equal(posts(gas), 1);
+    assert.equal(gas.sheet('Config').getRange('C7').getValue(), 'Cấu hình đã đổi — sẽ chạy lại ngay sau lần chạy hiện tại.');
   });
   test('đang chạy → "Đang chạy… (bắt đầu hh:mm, đã N phút)", link tới lần chạy', () => {
     const gas = started();
     gas.setRuns([run({ status: 'in_progress', run_started_at: new Date(Date.now() - 2 * 60000).toISOString() })]);
     gas.ctx.watchRun();
-    assert.match(progress(gas), /^Đang chạy… \(bắt đầu \d\d:\d\d, đã 2 phút\)$/);
+    assert.match(progress(gas), /^⏳ Đang chạy… \(bắt đầu \d\d:\d\d, đã 2 phút\)$/);
     assert.equal(link(gas), 'https://github.com/TienBeta/iptv_monitor/actions/runs/1');
     assert.equal(watchers(gas), 1);
   });
@@ -198,7 +242,8 @@ describe('Code.gs — dòng "Tiến trình" sau khi bấm Chạy ngay', () => {
     const gas = started();
     gas.setRuns([run({ status: 'completed', conclusion: 'success', updated_at: new Date().toISOString() })]);
     gas.ctx.watchRun();
-    assert.match(progress(gas), /^✓ Xong lúc \d\d:\d\d — xem kết quả ở sheet Streams$/);
+    assert.match(progress(gas), /^✓ Xong lúc \d\d:\d\d — có thể bấm Chạy ngay lại$/);
+    assert.equal(color(gas), '#d9f2e3');
     assert.equal(watchers(gas), 0);
     assert.equal(gas.props.has('RUN_WATCH'), false);
   });
@@ -207,6 +252,7 @@ describe('Code.gs — dòng "Tiến trình" sau khi bấm Chạy ngay', () => {
     gas.setRuns([run({ status: 'completed', conclusion: 'failure', updated_at: new Date().toISOString() })]);
     gas.ctx.watchRun();
     assert.match(progress(gas), /^✗ Lỗi lúc/);
+    assert.equal(color(gas), '#f8d4d4');
     assert.equal(link(gas), 'https://github.com/TienBeta/iptv_monitor/actions/runs/1');
     assert.equal(watchers(gas), 0);
   });
@@ -214,13 +260,13 @@ describe('Code.gs — dòng "Tiến trình" sau khi bấm Chạy ngay', () => {
     const gas = started();
     gas.setRuns([run({ status: 'completed', conclusion: 'failure', created_at: new Date(Date.now() - 3600000).toISOString() })]);
     gas.ctx.watchRun();
-    assert.equal(progress(gas), 'Đang chờ GitHub bắt đầu chạy…');
+    assert.equal(progress(gas), '⏳ Đang chờ GitHub bắt đầu chạy…');
     assert.equal(watchers(gas), 1);
   });
   test('gửi yêu cầu thất bại → không bật theo dõi', () => {
     const { gas } = ready();
     tick(gas); // no GitHub token
     assert.equal(watchers(gas), 0);
-    assert.equal(progress(gas), '');
+    assert.equal(progress(gas), 'Sẵn sàng');
   });
 });

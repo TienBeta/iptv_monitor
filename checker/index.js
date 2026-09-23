@@ -107,11 +107,12 @@ export async function runMonitor({ env = process.env, checkOptions = {}, io = {}
   if (!bridgeUrl && env.GITHUB_ACTIONS === 'true' && env.LOCAL_MODE !== '1') {
     throw new Error('Thiếu secret SHEET_BRIDGE_URL / SHEET_BRIDGE_TOKEN (xem docs/setup.md)');
   }
+  const bridgeToken = String(env.SHEET_BRIDGE_TOKEN || '').trim(); // pasted secrets often carry a newline
   const load = io.load || (bridgeUrl
-    ? () => callBridge(bridgeUrl, env.SHEET_BRIDGE_TOKEN, 'load')
+    ? () => callBridge(bridgeUrl.trim(), bridgeToken, 'load')
     : () => loadLocal(env, outDir));
   const save = io.save || (bridgeUrl
-    ? (payload) => callBridge(bridgeUrl, env.SHEET_BRIDGE_TOKEN, 'save', payload)
+    ? (payload) => callBridge(bridgeUrl.trim(), bridgeToken, 'save', payload)
     : (payload) => saveLocal(outDir, payload));
 
   // 1. Config + previous state
