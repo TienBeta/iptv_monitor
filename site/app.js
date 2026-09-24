@@ -22,6 +22,8 @@
   ];
   const LABEL_NAMES = { 'Geo-blocked': 'Giới hạn quốc gia', 'Not 24/7': 'Không phát 24/7' };
   const PAGE = 200;
+  const NO_COUNTRY = 'NONE';
+  const STATUS_FILTERS = ['ALL', 'ONLINE', 'SLOW', 'FAILING', 'OFFLINE', 'OTHER'];
   const REFRESH_MS = 10 * 60 * 1000;
 
   const $ = (id) => document.getElementById(id);
@@ -68,11 +70,17 @@
     return row.status === state.status;
   }
 
+  function matchesCountry(row) {
+    if (state.country === 'ALL') return true;
+    if (state.country === NO_COUNTRY) return !row.country;
+    return row.country === state.country;
+  }
+
   function filtered() {
     const q = state.q.trim().toLowerCase();
     const rows = state.data.streams.filter((r) =>
       matchesStatus(r) &&
-      (state.country === 'ALL' || r.country === state.country) &&
+      matchesCountry(r) &&
       (!q || r.title.toLowerCase().includes(q) || r.channel.toLowerCase().includes(q) || r.url.toLowerCase().includes(q)));
     const key = state.sort;
     const dir = state.dir;
@@ -101,13 +109,18 @@
     }
   }
 
+  // Tiles follow the country filter, so "Việt Nam" shows Việt Nam's numbers.
   function renderTiles(data) {
     const box = $('tiles');
     box.replaceChildren();
+    const scope = data.streams.filter(matchesCountry);
+    const counts = {};
+    for (const r of scope) counts[r.status] = (counts[r.status] || 0) + 1;
+    const total = scope.length;
     for (const t of TILES) {
-      const value = t.key === 'ALL' ? data.total
-        : t.statuses ? t.statuses.reduce((n, s) => n + (data.counts[s] || 0), 0)
-          : data.counts[t.key] || 0;
+      const value = t.key === 'ALL' ? total
+        : t.statuses ? t.statuses.reduce((n, s) => n + (counts[s] || 0), 0)
+          : counts[t.key] || 0;
       const btn = el('button', `tile${state.status === t.key ? ' active' : ''}`);
       btn.type = 'button';
       btn.setAttribute('aria-pressed', String(state.status === t.key));
@@ -116,8 +129,8 @@
       if (cls) head.append(el('span', `dot ${cls}`));
       head.append(document.createTextNode(t.label));
       btn.append(head, el('span', 'tile-value', numFmt.format(value)));
-      if (t.key !== 'ALL' && data.total) {
-        btn.append(el('span', 'tile-share', `${Math.round((value / data.total) * 100)}%`));
+      if (t.key !== 'ALL' && total) {
+        btn.append(el('span', 'tile-share', `${Math.round((value / total) * 100)}%`));
       }
       btn.addEventListener('click', () => {
         state.status = state.status === t.key && t.key !== 'ALL' ? 'ALL' : t.key;
@@ -137,14 +150,45 @@
     status.value = state.status;
 
     const countries = new Map();
-    for (const r of data.streams) if (r.country) countries.set(r.country, [r.flag, r.countryName].filter(Boolean).join(' '));
+    let unknown = 0;
+    for (const r of data.streams) {
+      if (!r.country) {
+        unknown++;
+        continue;
+      }
+      const c = countries.get(r.country)
+        || { label: [r.flag, r.countryName].filter(Boolean).join(' ') || r.country, name: r.countryName || r.country, n: 0 };
+      c.n++;
+      countries.set(r.country, c);
+    }
     const country = $('country');
-    country.replaceChildren(new Option('Tất cả quốc gia', 'ALL'));
-    [...countries.entries()].sort((a, b) => collator.compare(a[1].replace(/^\S+\s/, ''), b[1].replace(/^\S+\s/, '')))
-      .forEach(([code, name]) => country.append(new Option(name, code)));
-    if (!countries.has(state.country)) state.country = 'ALL';
+    country.replaceChildren(new Option(`Tất cả quốc gia (${numFmt.format(data.streams.length)})`, 'ALL'));
+    [...countries.entries()].sort((a, b) => collator.compare(a[1].name, b[1].name))
+      .forEach(([code, c]) => country.append(new Option(`${c.label} (${numFmt.format(c.n)})`, code)));
+    if (unknown) country.append(new Option(`Không rõ quốc gia (${numFmt.format(unknown)})`, NO_COUNTRY));
+    const known = state.country === 'ALL' || countries.has(state.country) || (state.country === NO_COUNTRY && unknown > 0);
+    if (!known) state.country = 'ALL';
     country.value = state.country;
-    country.hidden = countries.size < 2;
+  }
+
+  // Filters live in the page link (#country=VN&status=OFFLINE) so a filtered
+  // view can be shared and survives the automatic refresh.
+  function readHash() {
+    const p = new URLSearchParams(location.hash.slice(1));
+    state.country = (p.get('country') || 'ALL').toUpperCase();
+    const status = (p.get('status') || 'ALL').toUpperCase();
+    state.status = STATUS_FILTERS.includes(status) ? status : 'ALL';
+    state.q = p.get('q') || '';
+    $('q').value = state.q;
+  }
+
+  function writeHash() {
+    const p = new URLSearchParams();
+    if (state.country !== 'ALL') p.set('country', state.country);
+    if (state.status !== 'ALL') p.set('status', state.status);
+    if (state.q.trim()) p.set('q', state.q.trim());
+    const hash = p.toString();
+    if (hash !== location.hash.slice(1)) history.replaceState(null, '', hash ? `#${hash}` : location.pathname + location.search);
   }
 
   function copy(text) {
@@ -217,6 +261,7 @@
 
   function render() {
     const data = state.data;
+    writeHash();
     renderTiles(data);
     const rows = filtered();
     const body = $('rows');
@@ -261,6 +306,14 @@
     state.sort = key;
     render();
   }));
+  window.addEventListener('hashchange', () => {
+    readHash();
+    if (!state.data) return;
+    fillSelects(state.data);
+    state.shown = PAGE;
+    render();
+  });
   setInterval(() => { if (!document.hidden) load(); }, REFRESH_MS);
+  readHash();
   load();
 })();
