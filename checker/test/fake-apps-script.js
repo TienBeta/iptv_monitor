@@ -170,8 +170,13 @@ export function loadAppsScript(file = new URL('../../apps-script/Code.gs', impor
         return {
           showModalDialog: (out, title) => dialogs.push({ title, html: out.html }),
           alert: (m) => { dialogs.push({ alert: m }); return sandbox.__uiAnswer || 'OK'; },
+          prompt: (title) => {
+            dialogs.push({ prompt: title });
+            const answer = sandbox.__prompt || { button: 'CANCEL', text: '' };
+            return { getSelectedButton: () => answer.button, getResponseText: () => answer.text };
+          },
           ButtonSet: { YES_NO: 'YES_NO', OK_CANCEL: 'OK_CANCEL' },
-          Button: { YES: 'YES', NO: 'NO', OK: 'OK' },
+          Button: { YES: 'YES', NO: 'NO', OK: 'OK', CANCEL: 'CANCEL' },
         };
       },
       flush: () => {},

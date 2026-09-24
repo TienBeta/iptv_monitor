@@ -67,7 +67,7 @@ function onOpen() {
     .addItem('Nhập GitHub token', 'setGithubToken')
     .addItem('Xem bridge token', 'showBridgeToken')
     .addItem('Mã thao tác dashboard', 'showDashboardCode')
-    .addItem('Đổi mã thao tác dashboard', 'resetDashboardCode')
+    .addItem('Đặt / đổi mã thao tác dashboard', 'setDashboardCode')
     .addToUi();
 }
 
@@ -138,12 +138,38 @@ function showDashboardCode() {
   showCodeDialog_(code);
 }
 
-function resetDashboardCode() {
+// The owner picks a code that is easy to share (e.g. VULCAN-2026), or leaves it
+// empty for a random one. The code stays until it is set again here.
+function setDashboardCode() {
   const ui = SpreadsheetApp.getUi();
-  const answer = ui.alert('Đổi mã thao tác dashboard?',
-    'Mã cũ hết hiệu lực ngay; ai đã lưu mã cũ trên dashboard sẽ phải nhập mã mới.', ui.ButtonSet.YES_NO);
-  if (answer !== ui.Button.YES) return;
-  showCodeDialog_(saveNewCode_());
+  const res = ui.prompt('Đặt mã thao tác dashboard',
+    'Nhập mã mới: 6–32 chữ không dấu hoặc số, có thể thêm dấu gạch / khoảng trắng (được bỏ qua, ' +
+    'không phân biệt hoa thường). Tránh mã dễ đoán như 123456.\n' +
+    'Để trống rồi bấm OK = tạo mã ngẫu nhiên.\n\n' +
+    'Mã cũ hết hiệu lực ngay; ai đã lưu mã cũ trên dashboard sẽ phải nhập mã mới.',
+    ui.ButtonSet.OK_CANCEL);
+  if (res.getSelectedButton() !== ui.Button.OK) return;
+  const typed = res.getResponseText().trim();
+  if (!typed) {
+    showCodeDialog_(saveNewCode_());
+    return;
+  }
+  const problem = codeProblem_(typed);
+  if (problem) {
+    ui.alert(problem + '\n\nMã cũ vẫn giữ nguyên.');
+    return;
+  }
+  showCodeDialog_(saveCode_(typed.toUpperCase().replace(/\s+/g, ' ')));
+}
+
+function codeProblem_(typed) {
+  if (!/^[A-Za-z0-9 -]+$/.test(typed)) return 'Mã chỉ được có chữ không dấu (A–Z), số, dấu gạch hoặc khoảng trắng.';
+  const core = normalizeCode_(typed);
+  if (core.length < 6 || core.length > 32) return 'Mã cần 6–32 chữ hoặc số (không tính dấu gạch, khoảng trắng).';
+  if (/^(.)\1+$/.test(core) || '0123456789'.indexOf(core) >= 0 || '9876543210'.indexOf(core) >= 0) {
+    return 'Mã quá dễ đoán, hãy chọn mã khác.';
+  }
+  return null;
 }
 
 function showCodeDialog_(code) {
@@ -151,10 +177,10 @@ function showCodeDialog_(code) {
     '<div style="font:14px Arial,sans-serif;line-height:1.5">' +
     '<p>Nhập mã này trên dashboard khi bấm <b>Chạy ngay</b> hoặc đổi <b>Lịch chạy</b>. ' +
     'Xem trạng thái thì không cần mã.</p>' +
-    copyBox_('c', formatCode_(code)) +
+    copyBox_('c', code) +
     '<p>Dashboard: <a href="' + DASHBOARD_URL + '" target="_blank">' + DASHBOARD_URL + '</a></p>' +
     '<p style="color:#5f6368">Chỉ gửi mã cho người được phép chạy kiểm tra. Lộ mã thì dùng menu ' +
-    '<b>Đổi mã thao tác dashboard</b>.</p>' +
+    '<b>Đặt / đổi mã thao tác dashboard</b>.</p>' +
     '<script>function cp(id){var e=document.getElementById(id);e.select();' +
     'try{navigator.clipboard.writeText(e.value)}catch(x){}document.execCommand("copy");' +
     'document.getElementById(id+"s").textContent="Đã copy";}</script></div>',
@@ -162,12 +188,16 @@ function showCodeDialog_(code) {
   try {
     SpreadsheetApp.getUi().showModalDialog(html, 'Mã thao tác dashboard');
   } catch (err) {
-    Logger.log(formatCode_(code)); // run from the editor: no UI
+    Logger.log(code); // run from the editor: no UI
   }
 }
 
 function saveNewCode_() {
-  const code = newCode_();
+  return saveCode_(formatCode_(newCode_()));
+}
+
+// Stored as shown to people (e.g. ABCD-EFGH); compared without dashes/spaces/case.
+function saveCode_(code) {
   const props = PropertiesService.getScriptProperties();
   props.setProperty('DASHBOARD_CODE', code);
   props.deleteProperty('CODE_FAILS');
@@ -206,7 +236,7 @@ function checkCode_(given) {
     const minutes = Math.max(1, Math.ceil((fails.since + CODE_LOCK_MS - now) / 60000));
     return { error: 'locked', message: 'Nhập sai mã quá nhiều lần — thử lại sau ' + minutes + ' phút.' };
   }
-  if (normalizeCode_(given) === code) return null;
+  if (normalizeCode_(given) === normalizeCode_(code)) return null;
   fails.n++;
   props.setProperty('CODE_FAILS', JSON.stringify(fails));
   return { error: 'bad_code', message: 'Mã thao tác không đúng.' };
@@ -232,7 +262,8 @@ function setup() {
 
   alert_('Cài đặt xong.\n\nBridge token (dán vào GitHub secret SHEET_BRIDGE_TOKEN):\n\n' +
     props.getProperty('BRIDGE_TOKEN') +
-    '\n\nMã thao tác dashboard (Chạy ngay / đổi lịch): ' + formatCode_(props.getProperty('DASHBOARD_CODE')) +
+    '\n\nMã thao tác dashboard (Chạy ngay / đổi lịch): ' + props.getProperty('DASHBOARD_CODE') +
+    ' (tự đặt mã khác: menu IPTV Monitor → Đặt / đổi mã thao tác dashboard)' +
     '\nLịch tự chạy: ' + scheduleText_(readSchedule_()) +
     '\n\nBước tiếp theo: Deploy → New deployment → Web app (xem docs/setup.md).');
 }

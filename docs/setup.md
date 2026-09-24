@@ -32,7 +32,8 @@ Thứ tự: A (Sheet) → B (GitHub) → C (chạy lần đầu) → D (chia s�
 4. Nếu lần đầu Google chỉ xin quyền mà không chạy, chọn lại **IPTV Monitor → Cài đặt ban đầu**.
 5. Hộp thoại hiện **Bridge token** (chuỗi 64 ký tự). **Copy lại** — dùng ở bước B3.
    (Xem lại bất cứ lúc nào: **IPTV Monitor → Xem bridge token**.)
-   Hộp thoại cũng có **mã thao tác dashboard** (dạng `ABCD-EFGH`, dùng ở mục D) và lịch tự chạy mặc định.
+   Hộp thoại cũng có **mã thao tác dashboard** (mã ngẫu nhiên dạng `ABCD-EFGH`, dùng ở mục D) và lịch tự chạy mặc định.
+   Muốn mã dễ nhớ: **IPTV Monitor → Đặt / đổi mã thao tác dashboard** → gõ mã của bạn (VD `VULCAN-2026`).
 
 Sheet giờ có: `Config`, `Exclude`, `Streams` và `_data` (ẩn).
 
@@ -130,11 +131,14 @@ Khoảng 1–2 phút sau mở <https://tienbeta.github.io/iptv_monitor/>.
 4. Người được phép bấm **Chạy ngay** / đổi **Lịch chạy** trên dashboard: gửi riêng cho họ **mã thao tác**
    (**IPTV Monitor → Mã thao tác dashboard**). Dashboard hỏi mã ở lần bấm đầu và có thể ghi nhớ trên máy đó.
    Người chỉ xem thì không cần mã.
+   Mã **cố định** cho tới khi bạn đổi (chạy lại *Cài đặt ban đầu* cũng không đổi mã). Tự đặt mã dễ nhớ:
+   **IPTV Monitor → Đặt / đổi mã thao tác dashboard** → 6–32 chữ không dấu / số, có thể có dấu gạch
+   (không phân biệt hoa thường; tránh mã dễ đoán). Để trống = tạo mã ngẫu nhiên.
 
 > **Lưu ý bảo mật:** người có quyền Editor mở được Apps Script và xem được 2 token.
 > GitHub token chỉ có quyền chạy/huỷ workflow của repo này; bridge token chỉ đọc/ghi được chính Sheet này.
 > Mã thao tác chỉ cho phép chạy kiểm tra và đổi lịch trên dashboard; nhập sai 10 lần thì bị khoá 15 phút.
-> Nếu một người rời team: **IPTV Monitor → Đổi mã thao tác dashboard**, tạo GitHub token mới (B4) và đổi bridge token
+> Nếu một người rời team: **IPTV Monitor → Đặt / đổi mã thao tác dashboard**, tạo GitHub token mới (B4) và đổi bridge token
 > (xoá `BRIDGE_TOKEN` trong *Apps Script → Project Settings → Script Properties*, chạy lại **Cài đặt ban đầu**, cập nhật secret B3).
 
 ---
@@ -163,7 +167,7 @@ nút **Chạy ngay** + trạng thái trên dashboard. Làm **E1–E3 trước kh
 | Cập nhật code Apps Script | Dán code mới → Save → **Deploy → Manage deployments** → bút chì → Version: **New version** → Deploy (URL giữ nguyên) |
 | Đổi lịch tự chạy / tạm dừng | Dashboard → **Lịch chạy** → chọn *Chạy mỗi* + *Bắt đầu từ*, hoặc bỏ tick *Tự động chạy* → **Lưu lịch** (cần mã thao tác). Dừng hẳn: Actions → IPTV check → `···` → **Disable workflow** |
 | GitHub token hết hạn | Làm lại B4. Trong lúc hết hạn **không có lần tự chạy nào**; dashboard / ô Trạng thái báo “Không tự chạy được…” |
-| Đổi mã thao tác | **IPTV Monitor → Đổi mã thao tác dashboard** → gửi mã mới; ai lưu mã cũ sẽ được hỏi lại |
+| Đặt / đổi mã thao tác | **IPTV Monitor → Đặt / đổi mã thao tác dashboard** → gõ mã tự chọn (hoặc để trống = ngẫu nhiên) → gửi mã mới; ai lưu mã cũ sẽ được hỏi lại |
 | Chạy thử với stream thật, không đụng tới Sheet | Actions → **Smoke test** → Run workflow → nhập quốc gia + mức → xem **Summary** |
 | Chạy thử trên máy (tuỳ chọn, cần Node 22+) | `COUNTRIES=VN LEVEL=3 node checker/index.js` → `dist/results.json`; `npm test` để chạy test |
 
