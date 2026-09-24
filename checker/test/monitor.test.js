@@ -100,6 +100,7 @@ describe('toàn bộ luồng qua Google Sheet (giả lập)', () => {
     assert.equal(data.counts.FAILING, 1);
     assert.ok(!('referrer' in data.streams[0]));
     assert.deepEqual(data.streams.find((x) => x.title === 'VTV2').labels, ['Geo-blocked']);
+    assert.equal(data.controlUrl, web.url); // dashboard "Chạy ngay" / trạng thái
   });
   test('lần 2: lỗi lần thứ 2 → Không hoạt động; stream vừa chết → Đang lỗi', async () => {
     streams.breakFlip();
@@ -180,6 +181,7 @@ describe('chế độ khác', () => {
     assert.equal(first.rows[0].status, 'ONLINE');
     const second = await runMonitor({ env: localEnv, checkOptions: FAST });
     assert.equal(second.rows[0].firstSeen, first.rows[0].firstSeen);
+    assert.equal('controlUrl' in JSON.parse(readFileSync(path.join(dir, 'results.json'), 'utf8')), false);
   });
   test('log không lộ query string (token) của URL', async () => {
     const lines = [];

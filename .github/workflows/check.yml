@@ -1,9 +1,8 @@
-# Kiểm tra stream theo lịch (mỗi 3 giờ) hoặc khi bấm "Chạy ngay" trong Google Sheet.
+# Kiểm tra stream. Không dùng cron của GitHub: Apps Script gắn với Google Sheet
+# gọi workflow này theo lịch tự chạy (đổi được trên dashboard) và khi bấm "Chạy ngay".
 name: IPTV check
 
 on:
-  schedule:
-    - cron: '17 */3 * * *' # UTC → 01:17, 04:17, 07:17, ... giờ Việt Nam
   workflow_dispatch:
 
 # Mỗi lúc chỉ một lần chạy; lần mới xếp hàng chờ, không huỷ lần đang chạy.
@@ -31,7 +30,7 @@ jobs:
           fi
           echo "::warning::Chưa có secret SHEET_BRIDGE_URL / SHEET_BRIDGE_TOKEN — bỏ qua lần chạy này (xem docs/setup.md)."
           echo "ready=false" >> "$GITHUB_OUTPUT"
-          # Chạy tay mà thiếu cấu hình thì báo lỗi rõ ràng; chạy theo lịch thì bỏ qua êm.
+          # Thiếu cấu hình: chạy tay thì báo lỗi rõ ràng (sự kiện khác, nếu có, bỏ qua êm).
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then exit 1; fi
 
       - uses: actions/checkout@v5
@@ -66,6 +65,11 @@ jobs:
         run: |
           mkdir -p public
           cp -r site/. public/
+          # Pages lets browsers cache files for 10 minutes: version the CSS/JS
+          # links so a new index.html never runs with an old cached app.js/style.css.
+          v=$(cat site/app.js site/style.css | sha256sum | cut -c1-10)
+          sed -i -E "s/(href|src)=\"(style\.css|app\.js)\"/\1=\"\2?v=${v}\"/" public/index.html
+          grep -q "app.js?v=${v}" public/index.html && grep -q "style.css?v=${v}" public/index.html
           cp dist/results.json public/
           touch public/.nojekyll
           cd public

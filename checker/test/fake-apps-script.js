@@ -167,7 +167,12 @@ export function loadAppsScript(file = new URL('../../apps-script/Code.gs', impor
       getActiveSpreadsheet: () => ss,
       getUi: () => {
         if (!sandbox.__ui) throw new Error('no UI in tests');
-        return { showModalDialog: (out, title) => dialogs.push({ title, html: out.html }), alert: (m) => dialogs.push({ alert: m }) };
+        return {
+          showModalDialog: (out, title) => dialogs.push({ title, html: out.html }),
+          alert: (m) => { dialogs.push({ alert: m }); return sandbox.__uiAnswer || 'OK'; },
+          ButtonSet: { YES_NO: 'YES_NO', OK_CANCEL: 'OK_CANCEL' },
+          Button: { YES: 'YES', NO: 'NO', OK: 'OK' },
+        };
       },
       flush: () => {},
       newDataValidation: chain,
@@ -186,7 +191,7 @@ export function loadAppsScript(file = new URL('../../apps-script/Code.gs', impor
         deleteProperty: (k) => props.delete(k),
       }),
     },
-    LockService: { getScriptLock: () => ({ waitLock: () => {}, releaseLock: () => {} }) },
+    LockService: { getScriptLock: () => ({ waitLock: () => {}, tryLock: () => !sandbox.__lockBusy, releaseLock: () => {} }) },
     ContentService: {
       MimeType: { JSON: 'application/json' },
       createTextOutput: (s) => ({ content: s, setMimeType() { return this; }, getContent() { return s; } }),
@@ -207,7 +212,7 @@ export function loadAppsScript(file = new URL('../../apps-script/Code.gs', impor
       newTrigger: (handler) => ({
         timeBased: () => ({
           after: () => ({ create: () => trigger(handler, 'time') }),
-          everyMinutes: () => ({ create: () => trigger(handler, 'every') }),
+          everyMinutes: (n) => ({ create: () => Object.assign(trigger(handler, 'every'), { minutes: n }) }),
         }),
         forSpreadsheet: () => ({ onEdit: () => ({ create: () => trigger(handler, 'edit') }) }),
       }),
@@ -243,6 +248,7 @@ export function loadAppsScript(file = new URL('../../apps-script/Code.gs', impor
     withUi: () => { sandbox.__ui = true; },
     sheet: (name) => ss.getSheetByName(name),
     post: (body) => JSON.parse(sandbox.doPost({ postData: { contents: JSON.stringify(body) } }).getContent()),
+    get: (parameter) => JSON.parse(sandbox.doGet({ parameter }).getContent()),
     edit: (sheetName, a1) => sandbox.onConfigEdit({ range: ss.getSheetByName(sheetName).getRange(a1) }),
   };
 }
