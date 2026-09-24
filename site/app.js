@@ -1,29 +1,31 @@
 // Dashboard: reads results.json (written by GitHub Actions) and renders
-// summary tiles + a filterable table. All data goes through textContent.
+// summary metrics + a filterable table. All data goes through textContent.
 
 (function () {
   'use strict';
 
+  // tone: the only place status colours come from (ok / warn / err / neutral)
   const STATUS = {
-    OFFLINE: { label: 'Không hoạt động', icon: '✕', cls: 'critical', rank: 0 },
-    FAILING: { label: 'Đang lỗi', icon: '▲', cls: 'serious', rank: 1 },
-    SLOW: { label: 'Chậm', icon: '!', cls: 'warning', rank: 2 },
-    UNSUPPORTED: { label: 'Không kiểm tra được', icon: '–', cls: 'neutral', rank: 3 },
-    PENDING: { label: 'Chờ kiểm tra', icon: '…', cls: 'neutral', rank: 4 },
-    ONLINE: { label: 'Hoạt động', icon: '✓', cls: 'good', rank: 5 },
+    OFFLINE: { label: 'Không hoạt động', tone: 'err', rank: 0 },
+    FAILING: { label: 'Đang lỗi', tone: 'warn', rank: 1 },
+    SLOW: { label: 'Chậm', tone: 'warn', rank: 2 },
+    UNSUPPORTED: { label: 'Không kiểm tra được', tone: 'neutral', rank: 3 },
+    PENDING: { label: 'Chờ kiểm tra', tone: 'neutral', rank: 4 },
+    ONLINE: { label: 'Hoạt động', tone: 'ok', rank: 5 },
   };
-  const TILES = [
+  // Summary metrics. "Cảnh báo" groups Chậm + Đang lỗi (both shown in its sub-line);
+  // Không kiểm tra được / Chờ kiểm tra stay available as the "Khác" filter.
+  const METRICS = [
     { key: 'ALL', label: 'Tổng số link' },
-    { key: 'ONLINE', label: 'Hoạt động' },
-    { key: 'SLOW', label: 'Chậm' },
-    { key: 'FAILING', label: 'Đang lỗi' },
-    { key: 'OFFLINE', label: 'Không hoạt động' },
-    { key: 'OTHER', label: 'Khác', statuses: ['UNSUPPORTED', 'PENDING'] },
+    { key: 'ONLINE', label: 'Hoạt động', tone: 'ok', statuses: ['ONLINE'] },
+    { key: 'WARNING', label: 'Cảnh báo', tone: 'warn', statuses: ['SLOW', 'FAILING'] },
+    { key: 'OFFLINE', label: 'Không hoạt động', tone: 'err', statuses: ['OFFLINE'] },
   ];
+  const GROUPS = { WARNING: ['SLOW', 'FAILING'], OTHER: ['UNSUPPORTED', 'PENDING'] };
   const LABEL_NAMES = { 'Geo-blocked': 'Giới hạn quốc gia', 'Not 24/7': 'Không phát 24/7' };
   const PAGE = 200;
   const NO_COUNTRY = 'NONE';
-  const STATUS_FILTERS = ['ALL', 'ONLINE', 'SLOW', 'FAILING', 'OFFLINE', 'OTHER'];
+  const STATUS_FILTERS = ['ALL', 'ONLINE', 'WARNING', 'SLOW', 'FAILING', 'OFFLINE', 'OTHER'];
   const REFRESH_MS = 10 * 60 * 1000;
 
   const $ = (id) => document.getElementById(id);
@@ -34,7 +36,9 @@
   });
   const numFmt = new Intl.NumberFormat('vi-VN');
 
-  const state = { data: null, q: '', status: 'ALL', country: 'ALL', sort: 'status', dir: 1, shown: PAGE };
+  const state = { data: null, q: '', status: 'ALL', country: 'ALL', sort: 'status', dir: 1, shown: PAGE, loading: false };
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  const COPY_ICON = 'M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z';
 
   function el(tag, cls, text) {
     const node = document.createElement(tag);
@@ -47,6 +51,23 @@
     return ms ? timeFmt.format(new Date(ms)).replace(',', '') : '—';
   }
 
+  function formatDuration(sec) {
+    const total = Math.round(sec);
+    const m = Math.floor(total / 60);
+    const s = total % 60;
+    return m ? `${m} phút ${s} giây` : `${s} giây`;
+  }
+
+  function icon(path) {
+    const svg = document.createElementNS(SVG_NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('aria-hidden', 'true');
+    const p = document.createElementNS(SVG_NS, 'path');
+    p.setAttribute('d', path);
+    svg.append(p);
+    return svg;
+  }
+
   function ago(ms) {
     const min = Math.round((Date.now() - ms) / 60000);
     if (min < 1) return 'vừa xong';
@@ -55,19 +76,32 @@
     return h < 48 ? `${h} giờ trước` : `${Math.round(h / 24)} ngày trước`;
   }
 
-  function badge(status) {
+  function pill(status) {
     const s = STATUS[status] || STATUS.PENDING;
-    const wrap = el('span', 'badge');
-    const icon = el('span', `ico ${s.cls}`, s.icon);
-    icon.setAttribute('aria-hidden', 'true');
-    wrap.append(icon, el('span', null, s.label));
+    const wrap = el('span', `pill tone-${s.tone}`);
+    const dot = el('span', 'dot');
+    dot.setAttribute('aria-hidden', 'true');
+    wrap.append(dot, el('span', null, s.label));
     return wrap;
   }
 
   function matchesStatus(row) {
     if (state.status === 'ALL') return true;
-    if (state.status === 'OTHER') return row.status === 'UNSUPPORTED' || row.status === 'PENDING';
+    if (GROUPS[state.status]) return GROUPS[state.status].includes(row.status);
     return row.status === state.status;
+  }
+
+  const filtersActive = () => state.status !== 'ALL' || state.country !== 'ALL' || state.q.trim() !== '';
+
+  function clearFilters() {
+    state.q = '';
+    state.status = 'ALL';
+    state.country = 'ALL';
+    state.shown = PAGE;
+    $('q').value = '';
+    $('status').value = 'ALL';
+    $('country').value = 'ALL';
+    render();
   }
 
   function matchesCountry(row) {
@@ -95,8 +129,14 @@
   }
 
   function renderHeader(data) {
-    $('meta').textContent = `Cập nhật lúc ${formatTime(data.generatedAt)} (${ago(data.generatedAt)}) · Mức kiểm tra: ${data.levelLabel}`;
-    $('scope').textContent = data.scope || '';
+    const updated = $('updated');
+    updated.classList.remove('is-error');
+    updated.textContent = `Cập nhật lúc ${formatTime(data.generatedAt)} · ${ago(data.generatedAt)}`;
+    const context = $('context');
+    context.replaceChildren();
+    const parts = [`Mức kiểm tra: ${data.levelLabel}`, ...(data.scope ? String(data.scope).split(' · ') : [])];
+    if (data.durationSec) parts.push(`Thời gian chạy: ${formatDuration(data.durationSec)}`);
+    for (const part of parts) context.append(el('span', 'context-item', part));
     const banner = $('banner');
     if (data.sourceStatus === 'SOURCE_ERROR') {
       banner.textContent = 'Không tải được danh sách kênh mới từ iptv-org, đang kiểm tra theo danh sách cũ.';
@@ -109,31 +149,43 @@
     }
   }
 
-  // Tiles follow the country filter, so "Việt Nam" shows Việt Nam's numbers.
-  function renderTiles(data) {
-    const box = $('tiles');
+  // Metrics follow the country filter, so "Việt Nam" shows Việt Nam's numbers.
+  function renderMetrics(data) {
+    const box = $('metrics');
     box.replaceChildren();
     const scope = data.streams.filter(matchesCountry);
     const counts = {};
     for (const r of scope) counts[r.status] = (counts[r.status] || 0) + 1;
     const total = scope.length;
-    for (const t of TILES) {
-      const value = t.key === 'ALL' ? total
-        : t.statuses ? t.statuses.reduce((n, s) => n + (counts[s] || 0), 0)
-          : counts[t.key] || 0;
-      const btn = el('button', `tile${state.status === t.key ? ' active' : ''}`);
-      btn.type = 'button';
-      btn.setAttribute('aria-pressed', String(state.status === t.key));
-      const head = el('span', 'tile-label');
-      const cls = t.key === 'ALL' ? null : t.statuses ? 'neutral' : STATUS[t.key].cls;
-      if (cls) head.append(el('span', `dot ${cls}`));
-      head.append(document.createTextNode(t.label));
-      btn.append(head, el('span', 'tile-value', numFmt.format(value)));
-      if (t.key !== 'ALL' && total) {
-        btn.append(el('span', 'tile-share', `${Math.round((value / total) * 100)}%`));
+    const sum = (list) => list.reduce((n, st) => n + (counts[st] || 0), 0);
+    const pct = (n) => (total ? `${Math.round((n / total) * 100)}%` : '0%');
+    const countryLabel = state.country === 'ALL' ? 'Tất cả quốc gia'
+      : state.country === NO_COUNTRY ? 'Không rõ quốc gia' : ($('country').selectedOptions[0]?.textContent || '').replace(/\s*\([\d.,]+\)$/, '');
+    for (const m of METRICS) {
+      const value = m.statuses ? sum(m.statuses) : total;
+      let sub;
+      if (m.key === 'ALL') {
+        const other = sum(GROUPS.OTHER);
+        sub = other ? `${countryLabel} · Khác ${numFmt.format(other)}` : countryLabel;
+      } else if (m.key === 'WARNING') {
+        sub = `Chậm ${numFmt.format(counts.SLOW || 0)} · Đang lỗi ${numFmt.format(counts.FAILING || 0)}`;
+      } else {
+        sub = `${pct(value)} tổng số`;
       }
+      const active = state.status === m.key;
+      const btn = el('button', `metric${active ? ' is-active' : ''}`);
+      btn.type = 'button';
+      btn.setAttribute('aria-pressed', String(active));
+      const head = el('span', 'metric-label');
+      if (m.tone) {
+        const dot = el('span', `dot tone-${m.tone}`);
+        dot.setAttribute('aria-hidden', 'true');
+        head.append(dot);
+      }
+      head.append(document.createTextNode(m.label));
+      btn.append(head, el('span', 'metric-value', numFmt.format(value)), el('span', 'metric-sub', sub));
       btn.addEventListener('click', () => {
-        state.status = state.status === t.key && t.key !== 'ALL' ? 'ALL' : t.key;
+        state.status = state.status === m.key && m.key !== 'ALL' ? 'ALL' : m.key;
         $('status').value = state.status;
         state.shown = PAGE;
         render();
@@ -142,11 +194,26 @@
     }
   }
 
+  function renderMetricSkeleton() {
+    const box = $('metrics');
+    box.replaceChildren(...METRICS.map((m) => {
+      const card = el('div', 'metric is-loading');
+      card.append(el('span', 'metric-label', m.label), el('span', 'skeleton skeleton-value'), el('span', 'skeleton skeleton-sub'));
+      return card;
+    }));
+  }
+
   function fillSelects(data) {
     const status = $('status');
-    status.replaceChildren(new Option('Tất cả trạng thái', 'ALL'));
-    for (const key of ['ONLINE', 'SLOW', 'FAILING', 'OFFLINE']) status.append(new Option(STATUS[key].label, key));
-    status.append(new Option('Khác (không kiểm tra được / chờ)', 'OTHER'));
+    status.replaceChildren(
+      new Option('Tất cả trạng thái', 'ALL'),
+      new Option(STATUS.ONLINE.label, 'ONLINE'),
+      new Option('Cảnh báo (chậm + đang lỗi)', 'WARNING'),
+      new Option(STATUS.SLOW.label, 'SLOW'),
+      new Option(STATUS.FAILING.label, 'FAILING'),
+      new Option(STATUS.OFFLINE.label, 'OFFLINE'),
+      new Option('Khác (không kiểm tra được / chờ)', 'OTHER'),
+    );
     status.value = state.status;
 
     const countries = new Map();
@@ -216,7 +283,7 @@
     t.textContent = msg;
     t.hidden = false;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { t.hidden = true; }, 1800);
+    toastTimer = setTimeout(() => { t.hidden = true; }, 2200);
   }
 
   function row(r) {
@@ -225,19 +292,17 @@
     const name = el('td', 'c-name');
     name.dataset.label = 'Tên kênh';
     name.append(el('div', 'title', r.title));
-    if (r.channel) name.append(el('div', 'sub', r.channel));
-    if (r.labels?.length) {
-      const chips = el('div', 'chips');
-      for (const l of r.labels) chips.append(el('span', 'chip', LABEL_NAMES[l] || l));
-      name.append(chips);
-    }
+    const sub = el('div', 'sub');
+    if (r.channel) sub.append(el('span', 'channel', r.channel));
+    for (const l of r.labels || []) sub.append(el('span', 'chip', LABEL_NAMES[l] || l));
+    if (sub.childNodes.length) name.append(sub);
 
     const country = el('td', 'c-country', [r.flag, r.countryName].filter(Boolean).join(' ') || '—');
     country.dataset.label = 'Quốc gia';
 
     const status = el('td', 'c-status');
     status.dataset.label = 'Trạng thái';
-    status.append(badge(r.status));
+    status.append(pill(r.status));
     if (r.reason) status.append(el('div', 'reason', r.reason));
 
     const time = el('td', 'c-time', formatTime(r.lastChecked));
@@ -247,9 +312,11 @@
     link.dataset.label = 'Link';
     const url = el('span', 'url', r.url);
     url.title = r.url;
-    const btn = el('button', 'copy', 'Sao chép');
+    const btn = el('button', 'icon-btn icon-btn-sm copy');
     btn.type = 'button';
+    btn.title = 'Sao chép link';
     btn.setAttribute('aria-label', `Sao chép link ${r.title}`);
+    btn.append(icon(COPY_ICON));
     btn.addEventListener('click', () => copy(r.url));
     const box = el('div', 'linkbox');
     box.append(url, btn);
@@ -259,15 +326,42 @@
     return tr;
   }
 
+  function skeletonRows(n) {
+    return Array.from({ length: n }, () => {
+      const tr = el('tr', 'is-loading');
+      for (let i = 0; i < 5; i++) {
+        const td = el('td');
+        td.append(el('span', `skeleton skeleton-cell${i === 0 ? ' wide' : ''}`));
+        tr.append(td);
+      }
+      return tr;
+    });
+  }
+
+  // One place decides which block of the table card is visible. Filters stay
+  // disabled until there is data to filter (render() needs state.data).
+  function showView(view) {
+    const ready = view === 'table' || view === 'empty';
+    for (const id of ['q', 'status', 'country']) $(id).disabled = !ready;
+    $('rows').closest('.table-card').dataset.view = view;
+    $('rows').closest('.table-scroll').hidden = view === 'error';
+    $('empty').hidden = view !== 'empty';
+    $('error').hidden = view !== 'error';
+    $('table-foot').hidden = view !== 'table';
+  }
+
   function render() {
     const data = state.data;
     writeHash();
-    renderTiles(data);
+    renderMetrics(data);
     const rows = filtered();
     const body = $('rows');
-    body.replaceChildren(...rows.slice(0, state.shown).map(row));
+    const visible = rows.slice(0, state.shown);
+    body.replaceChildren(...visible.map(row));
     $('count').textContent = `${numFmt.format(rows.length)} kênh`;
-    $('empty').hidden = rows.length > 0;
+    $('clear').hidden = !filtersActive();
+    showView(rows.length ? 'table' : 'empty');
+    $('shown').textContent = `Hiển thị ${numFmt.format(visible.length)} / ${numFmt.format(rows.length)} kênh`;
     const more = $('more');
     const rest = rows.length - state.shown;
     more.hidden = rest <= 0;
@@ -279,20 +373,52 @@
     });
   }
 
+  function showError(notPublished) {
+    renderMetricSkeleton();
+    $('metrics').classList.add('is-empty');
+    $('updated').textContent = notPublished ? 'Chưa có dữ liệu' : 'Không tải được dữ liệu';
+    $('updated').classList.add('is-error');
+    $('error-title').textContent = notPublished ? 'Chưa có dữ liệu.' : 'Không tải được dữ liệu.';
+    $('error-text').textContent = notPublished
+      ? 'Nếu vừa cài đặt, hãy đợi lần kiểm tra đầu tiên chạy xong rồi tải lại trang.'
+      : 'Kiểm tra kết nối mạng rồi thử lại.';
+    $('count').textContent = '';
+    showView('error');
+  }
+
   async function load() {
+    if (state.loading) return;
+    state.loading = true;
+    $('refresh').disabled = true;
+    $('refresh').classList.add('is-spinning');
+    if (!state.data) {
+      renderMetricSkeleton();
+      $('rows').replaceChildren(...skeletonRows(8));
+      showView('loading');
+    }
     try {
       const res = await fetch(`results.json?v=${Date.now()}`, { cache: 'no-store' });
-      if (!res.ok) throw new Error(String(res.status));
+      if (!res.ok) throw Object.assign(new Error(String(res.status)), { status: res.status });
       const data = await res.json();
       data.streams = data.streams || [];
       state.data = data;
+      $('metrics').classList.remove('is-empty');
       renderHeader(data);
       fillSelects(data);
       render();
-    } catch {
+    } catch (err) {
       if (!state.data) {
-        $('meta').textContent = 'Chưa có dữ liệu. Nếu vừa cài đặt, hãy đợi lần kiểm tra đầu tiên chạy xong rồi tải lại trang.';
+        showError(err.status === 404);
+      } else {
+        // Keep showing the last data; say the refresh failed.
+        const updated = $('updated');
+        updated.textContent = `Cập nhật lúc ${formatTime(state.data.generatedAt)} · không làm mới được, thử lại sau`;
+        updated.classList.add('is-error');
       }
+    } finally {
+      state.loading = false;
+      $('refresh').disabled = false;
+      $('refresh').classList.remove('is-spinning');
     }
   }
 
@@ -300,6 +426,10 @@
   $('status').addEventListener('change', (e) => { state.status = e.target.value; state.shown = PAGE; render(); });
   $('country').addEventListener('change', (e) => { state.country = e.target.value; state.shown = PAGE; render(); });
   $('more').addEventListener('click', () => { state.shown += PAGE; render(); });
+  $('clear').addEventListener('click', clearFilters);
+  $('empty-clear').addEventListener('click', clearFilters);
+  $('retry').addEventListener('click', load);
+  $('refresh').addEventListener('click', load);
   document.querySelectorAll('th button[data-sort]').forEach((b) => b.addEventListener('click', () => {
     const key = b.dataset.sort;
     state.dir = state.sort === key ? -state.dir : 1;

@@ -16,7 +16,7 @@ Workflow [`Tests`](../.github/workflows/test.yml) chạy lại mỗi khi có cod
 | Apps Script | Chạy **chính file `apps-script/Code.gs`** trên Google Sheet giả lập trong bộ nhớ | `checker/test/apps-script.test.js` |
 | Toàn bộ luồng | API iptv-org giả → checker → web app (trả 302 như Apps Script thật) → Sheet giả → `results.json` | `checker/test/monitor.test.js` |
 | Quy mô | 1.000 link trên 21 host, timeout thu nhỏ 10 lần | `checker/test/scale.test.js` |
-| Dashboard | Chụp màn hình bằng Chromium: máy tính, điện thoại (390 px), nền tối; không tràn ngang, không lỗi JS | thủ công (xem Phase 4) |
+| Dashboard | Chạy bằng Chromium: máy tính (1280 px), tablet (900 px), điện thoại (390 / 320 px); bấm thẻ, lọc, tìm, sắp xếp, copy, Hiện thêm, Xoá bộ lọc, link có bộ lọc (#country=…); màn hình đang tải / rỗng / lỗi 404 / lỗi mạng + Thử lại; không tràn ngang, không lỗi JS | thủ công (xem Phase 4) |
 
 ## 15 test case đã yêu cầu
 

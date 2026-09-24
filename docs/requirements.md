@@ -150,9 +150,12 @@ số stream chưa kịp check.
 
 ### Dashboard (tiếng Việt)
 
-Thẻ tổng hợp theo trạng thái, thời điểm cập nhật, cảnh báo nguồn; bảng Tên kênh / Quốc gia /
-Trạng thái + Lý do / Kiểm tra lúc / Link (nút copy); tìm kiếm; lọc theo trạng thái và quốc gia;
-sắp xếp; nhãn "Giới hạn quốc gia" / "Không phát 24/7"; giờ Việt Nam; dùng được trên điện thoại.
+4 thẻ tổng hợp: Tổng số link / Hoạt động / Cảnh báo (Chậm + Đang lỗi) / Không hoạt động — bấm
+thẻ để lọc; thời điểm cập nhật + nút làm mới; cảnh báo nguồn; bảng Tên kênh / Quốc gia /
+Trạng thái + Lý do / Kiểm tra lúc / Link (nút copy); tìm kiếm; lọc theo trạng thái (kể cả nhóm
+Cảnh báo và Khác = không kiểm tra được / chờ) và quốc gia; nút Xoá bộ lọc; sắp xếp; nhãn
+"Giới hạn quốc gia" / "Không phát 24/7"; giờ Việt Nam; màn hình đang tải / không có kết quả /
+lỗi tải (có nút Thử lại); nền sáng, dùng được trên máy tính, tablet, điện thoại.
 
 ## 7. Schedule
 
