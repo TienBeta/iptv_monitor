@@ -5,8 +5,8 @@
  *
  * - Web app (doPost): GitHub Actions đọc cấu hình + trạng thái cũ ("load")
  *   và ghi kết quả ("save"). Mọi request phải có đúng BRIDGE_TOKEN.
- * - Ô tick "Chạy ngay" trong Config, hoặc menu IPTV Monitor → Chạy ngay:
- *   gọi GitHub API để chạy workflow ngay.
+ * - Menu IPTV Monitor → Chạy ngay (hoặc nút trên dashboard): gọi GitHub API
+ *   để chạy workflow ngay.
  * - Sửa Config / Exclude: tự hẹn chạy lại sau khoảng 1 phút.
  * - Lịch tự chạy: trigger autoRun (mỗi 10 phút) chạy workflow đúng các giờ đã hẹn.
  * - Dashboard: xem trạng thái (doGet ?action=status, ai cũng xem được);
@@ -20,13 +20,16 @@ const WORKFLOW_FILE = 'check.yml';
 const GITHUB_REF = 'main';
 
 const SHEET = { config: 'Config', exclude: 'Exclude', streams: 'Streams', data: '_data' };
-const CELL = { runNow: 'B7', message: 'C7' };
+// Config: B3:B6 inputs · B7 lịch tự chạy · B8 trạng thái (+ C8 link GitHub) · B9 thông báo ·
+// A10 "LẦN CHẠY GẦN NHẤT" · summary from row 11. The script writes everything from row 7 down.
+const CELL = { schedule: 'B7', message: 'B9' };
 const INPUT_FIRST_ROW = 3; // B3:B6 = Quốc gia, Ngôn ngữ, Thể loại, Mức kiểm tra
 const INPUT_LAST_ROW = 6;
-const PROGRESS_ROW = 8; // A8 "Trạng thái", B8 trạng thái lần chạy, C8 link GitHub
+const PROGRESS_ROW = 8;
+const SUMMARY_HEADER_ROW = 10;
 const STATE_COLORS = { busy: '#fff4cc', ok: '#d9f2e3', error: '#f8d4d4', idle: '#ffffff' };
 const JUST_SENT_MS = 2 * 60 * 1000; // after a dispatch, GitHub may take a few seconds to list the run
-const SUMMARY_ROW = 10;
+const SUMMARY_ROW = 11;
 const ACTIONS_URL = 'https://github.com/' + GITHUB_REPO + '/actions/workflows/' + WORKFLOW_FILE;
 const WATCH_MAX_MS = 3 * 60 * 60 * 1000;
 const SCHEDULE_HOURS = [1, 2, 3, 4, 6, 8, 12, 24];
@@ -58,16 +61,19 @@ const STATUS_COLORS = {
 
 // ---------------------------------------------------------------- menu
 
+// MKT only needs "Chạy ngay"; the owner's items sit in a submenu so they are not clicked by mistake.
 function onOpen() {
-  SpreadsheetApp.getUi()
-    .createMenu('IPTV Monitor')
+  const ui = SpreadsheetApp.getUi();
+  ui.createMenu('IPTV Monitor')
     .addItem('Chạy ngay', 'runNow')
     .addSeparator()
-    .addItem('Cài đặt ban đầu', 'setup')
-    .addItem('Nhập GitHub token', 'setGithubToken')
-    .addItem('Xem bridge token', 'showBridgeToken')
-    .addItem('Mã thao tác dashboard', 'showDashboardCode')
-    .addItem('Đặt / đổi mã thao tác dashboard', 'setDashboardCode')
+    .addSubMenu(ui.createMenu('Quản trị (chủ Sheet)')
+      .addItem('Cài đặt ban đầu', 'setup')
+      .addItem('Nhập GitHub token', 'setGithubToken')
+      .addItem('Xem bridge token', 'showBridgeToken')
+      .addSeparator()
+      .addItem('Xem mã thao tác dashboard', 'showDashboardCode')
+      .addItem('Đặt / đổi mã thao tác dashboard', 'setDashboardCode'))
     .addToUi();
 }
 
@@ -88,7 +94,7 @@ function setGithubToken() {
   const token = res.getResponseText().trim();
   if (!token) return;
   PropertiesService.getScriptProperties().setProperty('GITHUB_TOKEN', token);
-  ui.alert('Đã lưu GitHub token. Thử tick ô "Chạy ngay" trong sheet Config.');
+  ui.alert('Đã lưu GitHub token. Thử menu IPTV Monitor → Chạy ngay.');
 }
 
 // Shows the token in a box with a Copy button (copying from an alert is error-prone),
@@ -96,7 +102,7 @@ function setGithubToken() {
 function showBridgeToken() {
   const token = PropertiesService.getScriptProperties().getProperty('BRIDGE_TOKEN');
   if (!token) {
-    alert_('Chưa có token — chạy menu IPTV Monitor → Cài đặt ban đầu.');
+    alert_('Chưa có token — chạy menu IPTV Monitor → Quản trị → Cài đặt ban đầu.');
     return;
   }
   const url = ScriptApp.getService().getUrl() || '';
@@ -227,7 +233,7 @@ function checkCode_(given) {
   const props = PropertiesService.getScriptProperties();
   const code = props.getProperty('DASHBOARD_CODE');
   if (!code) {
-    return { error: 'no_code', message: 'Sheet chưa có mã thao tác — chủ Sheet mở menu IPTV Monitor → Mã thao tác dashboard.' };
+    return { error: 'no_code', message: 'Sheet chưa có mã thao tác — chủ Sheet mở menu IPTV Monitor → Quản trị → Xem mã thao tác dashboard.' };
   }
   const now = Date.now();
   let fails = JSON.parse(props.getProperty('CODE_FAILS') || 'null');
@@ -258,12 +264,13 @@ function setup() {
   if (!props.getProperty('DASHBOARD_CODE')) saveNewCode_();
   installEditTrigger_(ss);
   ensureScheduleTrigger_();
+  showSchedule_();
   ss.setActiveSheet(ss.getSheetByName(SHEET.config));
 
   alert_('Cài đặt xong.\n\nBridge token (dán vào GitHub secret SHEET_BRIDGE_TOKEN):\n\n' +
     props.getProperty('BRIDGE_TOKEN') +
     '\n\nMã thao tác dashboard (Chạy ngay / đổi lịch): ' + props.getProperty('DASHBOARD_CODE') +
-    ' (tự đặt mã khác: menu IPTV Monitor → Đặt / đổi mã thao tác dashboard)' +
+    ' (tự đặt mã khác: menu IPTV Monitor → Quản trị → Đặt / đổi mã thao tác dashboard)' +
     '\nLịch tự chạy: ' + scheduleText_(readSchedule_()) +
     '\n\nBước tiếp theo: Deploy → New deployment → Web app (xem docs/setup.md).');
 }
@@ -271,33 +278,61 @@ function setup() {
 function setupConfigSheet_(ss) {
   const sh = ss.getSheetByName(SHEET.config) || ss.insertSheet(SHEET.config, 0);
   if (sh.getRange('A3').getValue() !== 'Quốc gia') {
-    sh.getRange('A1:C7').setValues([
+    sh.getRange('A1:C6').setValues([
       ['IPTV MONITOR — CẤU HÌNH', '', ''],
       ['Mục', 'Giá trị', 'Hướng dẫn'],
       ['Quốc gia', 'VN', 'Mã 2 chữ cái, cách nhau dấu phẩy. VD: VN, TH. Để trống = tất cả quốc gia'],
       ['Ngôn ngữ', '', 'Mã 3 chữ cái. VD: vie, eng. Để trống = không lọc'],
       ['Thể loại', '', 'VD: news, sports, movies, kids, music. Để trống = không lọc'],
       ['Mức kiểm tra', LEVEL_OPTIONS[2], 'Mức càng cao càng chắc chắn nhưng chạy lâu hơn'],
-      ['Chạy ngay', false, 'Tick vào ô bên trái để chạy kiểm tra ngay'],
     ]);
-    sh.getRange('A9').setValue('LẦN CHẠY GẦN NHẤT');
   }
+  if (sh.getRange('A9').getValue() !== 'Thông báo') layoutRunRows_(sh);
   if (sh.getRange(PROGRESS_ROW, 2).getValue() === '') setProgress_('Sẵn sàng', ACTIONS_URL, 'idle', { phase: 'idle' });
   sh.getRange('B6').setDataValidation(SpreadsheetApp.newDataValidation()
     .requireValueInList(LEVEL_OPTIONS, true).setAllowInvalid(false).build());
-  sh.getRange(CELL.runNow).insertCheckboxes();
   sh.getRange('A1').setFontWeight('bold').setFontSize(13);
   sh.getRange('A2:C2').setFontWeight('bold').setBackground('#f1f3f4');
-  sh.getRange('A9').setFontWeight('bold');
+  sh.getRange('A7:A9').setFontWeight('normal');
+  sh.getRange('A' + SUMMARY_HEADER_ROW).setFontWeight('bold');
   sh.getRange('B3:B6').setBackground('#fff8e1');
   sh.setColumnWidth(1, 170);
   sh.setColumnWidth(2, 260);
   sh.setColumnWidth(3, 460);
-  if (!sh.getProtections(SpreadsheetApp.ProtectionType.RANGE).length) {
-    // Warnings only: MKT edits column B, labels and the run summary stay intact.
-    sh.getRange('A1:A30').protect().setDescription('Nhãn cấu hình').setWarningOnly(true);
-    sh.getRange('B10:B30').protect().setDescription('Kết quả lần chạy (script tự ghi)').setWarningOnly(true);
-  }
+  // Warnings only: MKT edits B3:B6; labels and what the script writes stay intact.
+  protectOnce_(sh, 'A1:A30', 'Nhãn cấu hình');
+  protectOnce_(sh, 'B7:B9', 'Lịch, trạng thái, thông báo (script tự ghi)');
+  protectOnce_(sh, 'B' + SUMMARY_ROW + ':B30', 'Kết quả lần chạy (script tự ghi)');
+}
+
+// Rows 7–10 (lịch tự chạy, trạng thái, thông báo, header). Also turns the old
+// layout — B7 "Chạy ngay" checkbox, header in row 9, summary from row 10 — into
+// this one; the next run writes the summary again.
+function layoutRunRows_(sh) {
+  sh.getRange('B7').clearDataValidations(); // the old checkbox
+  sh.getRange('A7:C7').clearContent();
+  sh.getRange('A9:C30').clearContent();
+  sh.getRange('A7:C7').setValues([['Lịch tự chạy', '', 'Đổi trên dashboard: nút "Lịch chạy"']]);
+  sh.getRange('A8').setValue('Trạng thái');
+  sh.getRange('A9').setValue('Thông báo');
+  sh.getRange('A' + SUMMARY_HEADER_ROW).setValue('LẦN CHẠY GẦN NHẤT');
+}
+
+function protectOnce_(sh, a1, description) {
+  const exists = sh.getProtections(SpreadsheetApp.ProtectionType.RANGE)
+    .some(function (p) { return p.getDescription() === description; });
+  if (!exists) sh.getRange(a1).protect().setDescription(description).setWarningOnly(true);
+}
+
+// B7: the schedule in words (it is changed on the dashboard).
+function showSchedule_() {
+  const sh = SpreadsheetApp.getActive().getSheetByName(SHEET.config);
+  if (!sh) return;
+  const s = readSchedule_();
+  const text = s.enabled
+    ? 'Mỗi ' + scheduleText_(s).slice(4)
+    : 'Đang tắt (chỉ chạy khi bấm Chạy ngay hoặc sửa cấu hình)';
+  sh.getRange(CELL.schedule).setValue(text);
 }
 
 function setupExcludeSheet_(ss) {
@@ -365,15 +400,6 @@ function onConfigEdit(e) {
   const name = sh.getName();
 
   if (name === SHEET.config) {
-    const box = sh.getRange(CELL.runNow);
-    if (range.getNumRows() === 1 && range.getNumColumns() === 1 &&
-        range.getRow() === box.getRow() && range.getColumn() === box.getColumn()) {
-      if (box.getValue() === true) {
-        box.setValue(false);
-        setMessage_(requestRun_());
-      }
-      return;
-    }
     const touchesInputs = range.getColumn() <= 2 && range.getLastColumn() >= 2 &&
       range.getRow() <= INPUT_LAST_ROW && range.getLastRow() >= INPUT_FIRST_ROW;
     if (touchesInputs) {
@@ -405,10 +431,10 @@ function scheduledRun() {
     : msg);
 }
 
-// "Chạy ngay" from the Sheet: refused while a run is queued or running.
+// "Chạy ngay" from the Sheet menu: refused while a run is queued or running.
 function requestRun_() {
   const r = tryRun_();
-  if (r.busy) return 'Đang có một lần chạy — đợi dòng "Trạng thái" báo Xong rồi hãy bấm lại.';
+  if (r.busy) return 'Đang có một lần chạy — đợi dòng "Trạng thái" báo Xong rồi hãy chạy lại.';
   if (r.error) return 'Không gửi được yêu cầu chạy: ' + r.error;
   return sentMessage_();
 }
@@ -459,7 +485,7 @@ function dispatch_() {
 
 function sentMessage_(from) {
   return 'Đã gửi yêu cầu chạy' + (from || '') + ' lúc ' +
-    Utilities.formatDate(new Date(), 'Asia/Ho_Chi_Minh', 'HH:mm dd/MM/yyyy') + '. Xem dòng "Trạng thái" bên dưới.';
+    Utilities.formatDate(new Date(), 'Asia/Ho_Chi_Minh', 'HH:mm dd/MM/yyyy') + '. Xem dòng "Trạng thái".';
 }
 
 function dispatchWorkflow_() {
@@ -469,7 +495,7 @@ function dispatchWorkflow_() {
 
 function githubFetch_(path, body) {
   const token = PropertiesService.getScriptProperties().getProperty('GITHUB_TOKEN');
-  if (!token) throw new Error('chưa nhập GitHub token (menu IPTV Monitor → Nhập GitHub token).');
+  if (!token) throw new Error('chưa nhập GitHub token (menu IPTV Monitor → Quản trị → Nhập GitHub token).');
   const options = {
     method: body ? 'post' : 'get',
     headers: {
@@ -673,6 +699,7 @@ function saveSchedule_(input) {
   // The new plan starts at its next time, not with a catch-up run right now.
   props.setProperty('AUTO_SLOT', String(slotAt_(s, Date.now(), false)));
   ensureScheduleTrigger_();
+  showSchedule_();
   setMessage_('Lịch tự chạy: ' + scheduleText_(s) + ' (đổi lúc ' + hhmm_(new Date()) + ').');
   return s;
 }
@@ -845,7 +872,7 @@ function doPost(e) {
 function handleLoad_() {
   const ss = SpreadsheetApp.getActive();
   const cfg = ss.getSheetByName(SHEET.config);
-  if (!cfg) throw new Error('chưa có sheet Config — chạy menu IPTV Monitor → Cài đặt ban đầu');
+  if (!cfg) throw new Error('chưa có sheet Config — chạy menu IPTV Monitor → Quản trị → Cài đặt ban đầu');
   const v = cfg.getRange(INPUT_FIRST_ROW, 2, INPUT_LAST_ROW - INPUT_FIRST_ROW + 1, 1).getDisplayValues()
     .map(function (r) { return r[0]; });
 

@@ -244,6 +244,14 @@ button.metric:hover { border-color: var(--border-strong); box-shadow: var(--shad
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.metric-value-row { display: flex; align-items: baseline; gap: 8px; max-width: 100%; }
+.metric-delta {
+  color: var(--tone-text);
+  font-size: 12px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 .metric-value {
   font-size: 28px;
   font-weight: 500;
@@ -268,6 +276,46 @@ button.metric:hover { border-color: var(--border-strong); box-shadow: var(--shad
   flex: none;
   border-radius: 50%;
   background: var(--tone, var(--text-3));
+}
+
+/* ---------- Changes since the previous run ---------- */
+.changes {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: -4px 0 16px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+.change-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.change-chip:hover { background: var(--surface-2); }
+.change-chip.is-active { border-color: var(--primary); background: var(--primary-weak); color: var(--primary); }
+.changes-note { color: var(--text-3); }
+.change-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: var(--tone-bg);
+  color: var(--tone-text);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 18px;
+  vertical-align: 1px;
+  white-space: nowrap;
 }
 
 /* ---------- Table card ---------- */
@@ -309,7 +357,7 @@ button.metric:hover { border-color: var(--border-strong); box-shadow: var(--shad
 .search input::placeholder, .field input::placeholder { color: var(--text-3); }
 .field input { width: 100%; padding: 0 12px; }
 .toolbar select, .field select {
-  flex: 0 1 230px;
+  flex: 0 1 210px;
   min-width: 0;
   padding: 0 32px 0 12px;
   appearance: none;
@@ -470,7 +518,10 @@ tbody tr:not(.is-loading):hover td { background: var(--surface-2); }
 }
 .pill .dot { width: 6px; height: 6px; }
 .reason { margin-top: 4px; color: var(--text-2); font-size: 12px; overflow-wrap: anywhere; }
-.c-time { color: var(--text-2); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.c-time { color: var(--text); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.seen-muted { color: var(--text-3); }
+.seen-sub { color: var(--text-3); font-size: 12px; }
+.seen-stale { color: var(--tone-text, #b06000); --tone-text: #b06000; }
 .c-link { padding-top: 6px; padding-bottom: 6px; }
 .linkbox { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .url {
@@ -587,11 +638,13 @@ tbody tr:not(.is-loading):hover td { background: var(--surface-2); }
   .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-bottom: 12px; }
   .metric { padding: 10px 12px 12px; }
   .metric-value, .metrics.is-empty .skeleton-value { font-size: 22px; }
+  .changes { margin: -2px 0 12px; font-size: 12px; }
+  .changes-label { flex-basis: 100%; }
   .metric-label, .metric-sub { white-space: normal; }
 
   .toolbar { padding: 12px; }
   .search { flex-basis: 100%; }
-  .toolbar select { flex: 1 1 0; }
+  .toolbar select { flex: 1 1 calc(50% - 4px); }
   .toolbar-end { flex-basis: 100%; justify-content: space-between; margin-left: 0; }
   .toolbar-end .count { order: -1; }
   .text-btn { margin-right: -8px; }

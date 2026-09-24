@@ -13,6 +13,7 @@ const colToNum = (s) => [...s].reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64,
 class FakeProtection {
   constructor(type) { this.type = type; this.warningOnly = false; }
   setDescription(d) { this.description = d; return this; }
+  getDescription() { return this.description || ''; }
   setWarningOnly(w) { this.warningOnly = w; return this; }
   addEditor() { return this; }
   removeEditors() { return this; }
@@ -64,6 +65,7 @@ class FakeRange {
   setDataValidation(v) { this.sheet.validation = v; return this; }
   setRichTextValue(v) { this.setValue(v.text); this.sheet.links[`${this.row},${this.col}`] = v.url; return this; }
   insertCheckboxes() { if (this.getValue() === '') this.setValue(false); return this; }
+  clearDataValidations() { this.sheet.validations = (this.sheet.validations || []).filter((v) => v !== this.getA1Notation()); return this; }
   createFilter() { this.sheet.filter = new FakeFilter(this.sheet, this); return this.sheet.filter; }
   protect() { const p = new FakeProtection('RANGE'); this.sheet.protections.push(p); return p; }
   setFontWeight() { return this; }

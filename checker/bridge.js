@@ -44,7 +44,7 @@ export async function callBridge(url, token, action, payload = {}, timeoutMs = 5
   if (String(data.error || '').startsWith('unauthorized')) {
     const detail = String(data.error).replace(/^unauthorized:?\s*/, '') || 'token không khớp';
     throw new Error(`Apps Script từ chối (${action}): ${detail}. GitHub đang gửi token mã ${tokenCode(token)} `
-      + `dài ${token.length} ký tự. Đối chiếu với "Mã kiểm tra" ở menu IPTV Monitor → Xem bridge token trong Sheet `
+      + `dài ${token.length} ký tự. Đối chiếu với "Mã kiểm tra" ở menu IPTV Monitor → Quản trị → Xem bridge token trong Sheet `
       + '(xem docs/setup.md mục F)');
   }
   if (!data.ok) throw new Error(`Apps Script báo lỗi (${action}): ${data.error || 'không rõ'}`);

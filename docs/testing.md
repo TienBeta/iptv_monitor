@@ -47,7 +47,7 @@ Workflow [`Tests`](../.github/workflows/test.yml) chạy lại mỗi khi có cod
 - Ngưỡng trạng thái: 1 lỗi → Đang lỗi, 2 lỗi liên tiếp → Không hoạt động, 1 lần OK → Hoạt động; chậm > 5 s → Chậm.
 - Ngắt sớm host chết sau 3 lỗi kết nối; lỗi HTTP không làm ngắt host.
 - Hết ngân sách thời gian: dừng nhận việc mới, phần chưa check giữ trạng thái cũ.
-- Apps Script: token sai → `unauthorized`; tick “Chạy ngay” gọi đúng GitHub API rồi bỏ tick; sửa cấu hình nhiều lần chỉ hẹn 1 lần chạy; sửa cột hướng dẫn không chạy lại; giữ tiêu chí lọc của MKT sau mỗi lần ghi; chữ bắt đầu bằng `=` được lưu dạng chữ, không thành công thức.
+- Apps Script: token sai → `unauthorized`; menu “Chạy ngay” gọi đúng GitHub API; sửa cấu hình nhiều lần chỉ hẹn 1 lần chạy; sửa cột hướng dẫn không chạy lại; giữ tiêu chí lọc của MKT sau mỗi lần ghi; chữ bắt đầu bằng `=` được lưu dạng chữ, không thành công thức.
 - Log không bao giờ in query string (token) của URL.
 
 ## Chạy thật trên GitHub Actions (stream thật, chưa dùng Sheet)
@@ -75,6 +75,8 @@ kiểm tra ngay sau khi làm xong [docs/setup.md](setup.md):
 |---|---|---|
 | Stream thật qua Sheet | Bước C2 với `VN`, mức 3 | Run xanh trong ~2–3 phút; khoảng 80% “Hoạt động”; khoảng 10% “Bị chặn truy cập” vì runner ở Mỹ (khớp smoke test) |
 | Apps Script thật | Mở Sheet sau lần chạy | `Streams` có dữ liệu, cột Trạng thái tô màu, “Kiểm tra lúc” đúng giờ VN |
-| Chạy ngay / tự chạy | Tick B7; sửa B3 | C7 báo đã gửi; tab Actions có run mới (*workflow_dispatch*) sau vài phút |
+| Chạy ngay / tự chạy | Menu IPTV Monitor → Chạy ngay; sửa B3 | B9 (Thông báo) báo đã gửi; tab Actions có run mới (*workflow_dispatch*) sau vài phút |
+| Bố cục Config mới | Sheet cũ → Quản trị → Cài đặt ban đầu | Dòng 7 *Lịch tự chạy*, 8 *Trạng thái*, 9 *Thông báo*; hết ô tick B7; B3–B6 giữ nguyên |
+| Dashboard: thay đổi / lý do / hoạt động lần cuối | Mở dashboard sau lần chạy thứ 2 | Dòng *So với lần chạy trước* (bấm để lọc), mũi tên ▲▼ trên thẻ, lọc *Lý do*, cột *Hoạt động lần cuối* |
 | Lịch tự chạy | Xem tab Actions sau ~6 giờ | Có run *workflow_dispatch* trong ~10 phút sau các giờ đã hẹn (mặc định 01, 04, 07, 10, 13, 16, 19, 22 giờ VN) |
 | Dashboard: Chạy ngay / Lịch chạy | Bấm **Chạy ngay** → nhập mã; mở **Lịch chạy** → đổi → Lưu | Thanh trên cùng: *Đang chờ chạy* → *Đang chạy kiểm tra* → *Đã chạy xong*, rồi bảng tự tải kết quả mới; lịch mới hiện “lần tới …” |
