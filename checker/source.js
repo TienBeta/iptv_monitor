@@ -97,23 +97,124 @@ function better(a, b) {
   return false;
 }
 
+// ---------------------------------------------------------------- Exclude
+// Each line of the Sheet "Exclude" (column A):
+// - a full link ("…://…") removes exactly that link;
+// - text removes every link whose name or channel ID has it at the start of a
+//   word, ignoring case, accents, spaces and punctuation: "an ninh" / "anninh"
+//   match AnNinhTV.vn and "An Ninh TV", "dong thap" matches "Đồng Tháp TV1",
+//   "VTV" matches VTV1 but not "Lao SV TV" (words: lao, sv, tv);
+// - text with a "." or "/" and no spaces ("vtvprime.vn", "AnNinhTV.vn") is also
+//   looked for in the link. Plain text is not: most VN links are on vtvprime.vn,
+//   so "VTV" would otherwise remove nearly every channel.
+// Text with fewer than MIN_EXCLUDE_TEXT letters/digits is ignored ("TV").
+export const MIN_EXCLUDE_TEXT = 3;
+
+export function foldText(value) {
+  return String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[đĐ]/g, 'd').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+const isLink = (text) => /^[a-z][a-z0-9+.-]*:\/\//i.test(text);
+
+// "AnNinhTV.vn" → ["an", "ninh", "tv", "vn"]; "Đồng Tháp TV1" → ["dong", "thap", "tv1"]
+export function wordsOf(value) {
+  return String(value ?? '').replace(/(\p{Ll})(\p{Lu})/gu, '$1 $2').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[đĐ]/g, 'd').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+}
+
+// `compact` (folded, no spaces) starts at a word and runs over the next words.
+function startsAtWord(words, compact) {
+  for (let i = 0; i < words.length; i++) {
+    let joined = '';
+    for (let j = i; j < words.length && joined.length < compact.length; j++) joined += words[j];
+    // "vtv1" matches VTV1 / VTV1 HD, not VTV10: a number must end where the text ends
+    if (joined.startsWith(compact) && !(/\d$/.test(compact) && /\d/.test(joined.charAt(compact.length)))) return true;
+  }
+  return false;
+}
+
+export function excludeRules(entries) {
+  const rules = [];
+  const seen = new Set();
+  for (const raw of entries || []) {
+    const entry = String(raw ?? '').trim();
+    if (!entry || seen.has(entry)) continue;
+    seen.add(entry);
+    const link = isLink(entry);
+    const folded = link ? '' : foldText(entry);
+    const inLink = !link && /[./]/.test(entry) && !/\s/.test(entry) ? entry.toLowerCase() : '';
+    rules.push({ entry, link, folded, inLink, tooShort: !link && folded.length < MIN_EXCLUDE_TEXT, count: 0, names: [] });
+  }
+  return rules;
+}
+
+// True when a rule removes the stream; every matching rule counts it (for the report).
+export function applyExclude(rules, fields) {
+  let hit = false;
+  let folded = null;
+  for (const rule of rules) {
+    if (rule.tooShort) continue;
+    let match;
+    if (rule.link) {
+      match = fields.url === rule.entry;
+    } else {
+      folded ||= [fields.title, fields.channel, fields.name, ...(fields.altNames || [])].map(wordsOf);
+      match = folded.some((words) => startsAtWord(words, rule.folded))
+        || (!!rule.inLink && String(fields.url || '').toLowerCase().includes(rule.inLink));
+    }
+    if (match) {
+      hit = true;
+      rule.count++;
+      // channels, not link titles, so an unexpected match ("VTV" → ANTV on vtvprime.vn) is visible
+      const name = fields.name || fields.channel || fields.title || fields.url;
+      if (rule.names.length < 4 && !rule.names.includes(name)) rule.names.push(name);
+    }
+  }
+  return hit;
+}
+
+// What each line removes, written to column C of "Exclude" after every run.
+export function excludeReport(rules) {
+  return rules.map((r) => {
+    let text;
+    if (r.tooShort) text = `Chưa dùng: cần ít nhất ${MIN_EXCLUDE_TEXT} chữ hoặc số`;
+    else if (!r.count) text = r.link ? 'Không khớp link nào (link phải giống hệt)' : 'Không khớp kênh nào';
+    else {
+      const shown = r.names.slice(0, 3);
+      text = `${r.count} link: ${shown.join(', ')}${r.names.length > 3 ? ', …' : ''}`;
+    }
+    return { entry: r.entry, text };
+  });
+}
+
+/**
+ * The stream list for the config. `exclude`: Exclude lines (Set/array of
+ * strings) or rules from excludeRules() when the caller wants the report.
+ */
 export function buildList(source, config, exclude = new Set()) {
+  const rules = Array.isArray(exclude) && exclude.every((r) => typeof r === 'object') ? exclude : excludeRules(exclude);
   const channels = new Map(source.channels.map((c) => [c.id, c]));
   const feeds = new Map(source.feeds.map((f) => [`${f.channel}@${f.id}`, f]));
   const countries = new Map((source.countries || []).map((c) => [c.code, c]));
   const noFilter = !config.countries.length && !config.languages.length && !config.categories.length;
 
   const seen = new Set();
+  const excluded = new Set();
   const best = new Map();
   const withoutChannel = [];
 
   source.streams.forEach((s, index) => {
     const url = String(s.url ?? '').trim();
-    if (!url || seen.has(url) || exclude.has(url)) return;
+    if (!url || seen.has(url) || excluded.has(url)) return;
 
     if (!s.channel) {
       // No metadata: can't be filtered or grouped, so only kept when nothing is filtered.
       if (noFilter) {
+        if (applyExclude(rules, { url, title: s.title })) {
+          excluded.add(url);
+          return;
+        }
         seen.add(url);
         withoutChannel.push({ s, index });
       }
@@ -127,6 +228,11 @@ export function buildList(source, config, exclude = new Set()) {
       if (!feed?.languages?.some((l) => config.languages.includes(l))) return;
     }
     if (config.categories.length && !channel?.categories?.some((c) => config.categories.includes(c))) return;
+    // Checked inside the scope, so the report counts only links the Sheet would list.
+    if (applyExclude(rules, { url, title: s.title, channel: s.channel, name: channel?.name, altNames: channel?.alt_names })) {
+      excluded.add(url);
+      return;
+    }
 
     seen.add(url);
     const key = `${s.channel}@${s.feed ?? ''}`;

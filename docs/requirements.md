@@ -64,7 +64,17 @@ nằm trong menu con *Quản trị (chủ Sheet)*.
 
 ### Sheet `Exclude` (MKT sửa)
 
-Mỗi dòng: URL cần bỏ qua + ghi chú.
+Cột A mỗi dòng một mục, cột B ghi chú, cột C **Đang bỏ** (script ghi sau mỗi lần chạy: *"2 link: An Ninh TV"*,
+*"Không khớp kênh nào"*…). Cách so khớp:
+
+| Nhập | Bỏ những link nào |
+|---|---|
+| Link đầy đủ (`https://…`) | Đúng link đó (giống hệt). Kênh có link dự phòng thì link dự phòng hiện thay |
+| Chữ (`An Ninh`, `VTV`, `dong thap`) | Link có **tên kênh / tên khác / mã kênh** chứa chữ đó **ở đầu một từ** — không phân biệt hoa thường, dấu, khoảng trắng (`An Ninh` = `anninh` → AnNinhTV.vn, "An Ninh TV"; `VTV` → VTV1, VTVcab… nhưng không "Lao SV TV"). Chữ kết thúc bằng số khớp trọn số (`VTV1` không bỏ VTV10). Không so với link |
+| Có `.` hoặc `/`, không có khoảng trắng (`vtvprime.vn`, `AnNinhTV.vn`) | Như chữ, và thêm mọi link chứa đoạn đó |
+| Dưới 3 chữ/số (`TV`) | Không dùng (tránh xoá hết) |
+
+Lý do không so chữ thường với link: phần lớn link VN nằm trên `vtvprime.vn`, nên `VTV` sẽ bỏ gần hết danh sách.
 
 ### Field dùng từ `streams.json`
 
@@ -78,7 +88,7 @@ Khi check chỉ gửi `url`, `referrer` (header `Referer`), `user_agent` (header
 3. Ngôn ngữ: `languages` của feed giao với danh sách ≠ rỗng.
 4. Thể loại: `categories` của channel giao với danh sách ≠ rỗng.
 5. Ô trống = không lọc; nhiều giá trị trong 1 ô = OR; giữa các ô = AND. Stream không có metadata (`channel = null`) chỉ được giữ khi cả 3 ô đều trống.
-6. Loại URL có trong `Exclude`.
+6. Loại các link khớp `Exclude` (quy tắc ở trên; chỉ tính trong phạm vi sau bước 1–5).
 7. Giữ stream có label `Geo-blocked` / `Not 24/7`, gắn nhãn hiển thị.
 8. Dedupe URL.
 9. Mỗi channel+feed giữ 1 URL: không label → quality cao hơn (`1080p`/`1080i` → 1080, `null` → 0) → thứ tự trong API.

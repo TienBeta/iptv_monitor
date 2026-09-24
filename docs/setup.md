@@ -126,7 +126,10 @@ Khoảng 1–2 phút sau mở <https://tienbeta.github.io/iptv_monitor/>.
 1. Google Sheet → **Chia sẻ** → thêm email MKT → quyền **Người chỉnh sửa (Editor)**.
 2. Gửi link dashboard: <https://tienbeta.github.io/iptv_monitor/>.
 3. Hướng dẫn MKT (3 dòng):
-   - Chỉ sửa **ô vàng B3–B6** trong `Config` và sheet `Exclude`. Sửa xong hệ thống **tự chạy lại sau 1–2 phút**.
+   - Chỉ sửa **ô vàng B3–B6** trong `Config` và cột A, B của sheet `Exclude`. Sửa xong hệ thống **tự chạy lại sau 1–2 phút**.
+   - Bỏ kênh không cần theo dõi: sheet `Exclude`, cột A gõ **tên kênh** (VD `An Ninh`, `VTV1`), **tên miền** (VD `vtvprime.vn`)
+     hoặc **link đầy đủ**; không cần đúng hoa thường, dấu. Sau lần chạy, cột C **Đang bỏ** ghi rõ đã bỏ kênh nào —
+     xem lại để chắc không bỏ nhầm (VD `VTV` bỏ mọi kênh VTV và VTVcab).
    - Muốn chạy ngay: menu **IPTV Monitor → Chạy ngay** (hoặc nút **Chạy ngay** trên dashboard), rồi xem ô **Trạng thái** (dòng 8). Đang ⏳ thì chưa bấm lại được — đợi ✓ Xong.
    - Các mục khác trong menu nằm ở **Quản trị** — dành cho chủ Sheet, MKT không cần bấm.
    - Sheet `Streams` tự cập nhật theo lịch; lọc/sắp xếp thoải mái, nhưng sửa tay sẽ bị ghi đè.

@@ -343,13 +343,19 @@ function showSchedule_() {
   sh.getRange(CELL.schedule).setValue(text);
 }
 
+// A: what to leave out — a name / channel ID / part of a link ("An Ninh") or a
+// full link. B: notes. C: what each line removes, written by the script after each run.
 function setupExcludeSheet_(ss) {
   const sh = ss.getSheetByName(SHEET.exclude) || ss.insertSheet(SHEET.exclude);
-  if (sh.getRange('A1').getValue() === '') sh.getRange('A1:B1').setValues([['Link cần bỏ qua', 'Ghi chú']]);
-  sh.getRange('A1:B1').setFontWeight('bold').setBackground('#f1f3f4');
+  sh.getRange('A1:C1').setValues([[
+    'Bỏ qua: tên kênh, mã kênh hoặc link (VD: An Ninh)', 'Ghi chú', 'Đang bỏ (tự cập nhật sau mỗi lần chạy)',
+  ]]);
+  sh.getRange('A1:C1').setFontWeight('bold').setBackground('#f1f3f4');
   sh.setFrozenRows(1);
-  sh.setColumnWidth(1, 520);
-  sh.setColumnWidth(2, 300);
+  sh.setColumnWidth(1, 420);
+  sh.setColumnWidth(2, 260);
+  sh.setColumnWidth(3, 420);
+  protectOnce_(sh, 'C:C', 'Kết quả loại trừ (script tự ghi)');
 }
 
 function setupStreamsSheet_(ss) {
@@ -416,7 +422,7 @@ function onConfigEdit(e) {
     }
     return;
   }
-  if (name === SHEET.exclude) {
+  if (name === SHEET.exclude && range.getColumn() === 1) { // notes (B) and the report (C) don't count
     scheduleRun_();
     setMessage_('Danh sách loại trừ vừa thay đổi — sẽ tự chạy lại sau khoảng 1–2 phút.');
   }
@@ -951,12 +957,27 @@ function handleSave_(req) {
   writeTable_(dataSheet, req.data.header, req.data.rows, {});
   writeTable_(streamsSheet, req.streams.header, req.streams.rows, { dateColumn: req.streams.dateColumn, keepFilter: true });
   writeSummary_(ss, req.summary);
+  if (req.exclude) writeExcludeReport_(ss, req.exclude);
   PropertiesService.getScriptProperties().setProperty('LAST_RUN', JSON.stringify({
     sourceCount: req.summary.sourceCount,
     configHash: req.summary.configHash,
   }));
   SpreadsheetApp.flush();
   return { ok: true, rows: req.data.rows.length };
+}
+
+// Exclude!C: next to each line, what it removed in this run ("2 link: ANTV, …").
+function writeExcludeReport_(ss, report) {
+  const sh = ss.getSheetByName(SHEET.exclude);
+  if (!sh || sh.getLastRow() < 2) return;
+  const byEntry = {};
+  report.forEach(function (r) { byEntry[String(r.entry)] = String(r.text); });
+  const n = sh.getLastRow() - 1;
+  const values = sh.getRange(2, 1, n, 1).getDisplayValues().map(function (row) {
+    const entry = String(row[0]).trim();
+    return [entry && byEntry[entry] !== undefined ? cell_(byEntry[entry], false) : ''];
+  });
+  sh.getRange(2, 3, n, 1).setValues(values);
 }
 
 // Whole table in one setValues; keeps the MKT filter criteria on Streams.

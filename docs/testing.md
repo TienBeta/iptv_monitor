@@ -18,6 +18,7 @@ Workflow [`Tests`](../.github/workflows/test.yml) chạy lại mỗi khi có cod
 | Quy mô | 1.000 link trên 21 host, timeout thu nhỏ 10 lần | `checker/test/scale.test.js` |
 | Dashboard | Chạy bằng Chromium: máy tính (1280 px), tablet (900 px), điện thoại (390 / 320 px); bấm thẻ, lọc, tìm, sắp xếp, copy, Hiện thêm, Xoá bộ lọc, link có bộ lọc (#country=…); màn hình đang tải / rỗng / lỗi 404 / lỗi mạng + Thử lại; không tràn ngang, không lỗi JS | thủ công (xem Phase 4) |
 | Dashboard ↔ Apps Script | Chromium gọi **chính `Code.gs`** (Sheet giả) qua web app giả: nhập sai / đúng mã, Chạy ngay → đang chờ → đang chạy → xong → tự tải kết quả mới, đang chạy thì khoá nút, Cài đặt (đổi mức kiểm tra → ghi ô B6 + tự chạy lại; đổi lịch, tắt, lịch không hợp lệ), nhớ mã sau khi tải lại, Apps Script cũ / không kết nối được | thủ công |
+| Exclude theo chữ | Unit test + dữ liệu iptv-org thật (VN, 84 link): `An Ninh` → 2 link An Ninh TV; `VTV` → 55 link VTV/VTVcab (không dính Lao SV TV, ANTV); `VTV1` → 6 link VTV1 (không VTV10); `vtvprime.vn` → 6 link trên tên miền đó; `TV` → không dùng; cột C "Đang bỏ" | `checker/test/source.test.js`, `monitor.test.js` |
 | Lịch tự chạy, mã thao tác | Unit test trên `Code.gs`: đúng giờ chạy 1 lần/lượt, không chạy bù, bỏ lượt khi đang chạy, token hết hạn → báo lỗi, đổi lịch, khoá sau 10 lần sai mã | `checker/test/apps-script.test.js` |
 
 ## 15 test case đã yêu cầu

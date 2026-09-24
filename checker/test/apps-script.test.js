@@ -153,6 +153,17 @@ describe('Code.gs — web app (load / save)', () => {
     assert.equal(gas.sheet('_data').rows().length, 2);
     assert.deepEqual(gas.sheet('Streams').getFilter().getColumnFilterCriteria(5), { status: 'Không hoạt động' });
   });
+  test('Exclude: tiêu đề 3 cột; save ghi cột "Đang bỏ" cạnh từng dòng, xoá kết quả cũ của dòng đã xoá', () => {
+    const { gas, token } = ready();
+    const ex = gas.sheet('Exclude');
+    assert.deepEqual(ex.getRange('A1:C1').getValues()[0],
+      ['Bỏ qua: tên kênh, mã kênh hoặc link (VD: An Ninh)', 'Ghi chú', 'Đang bỏ (tự cập nhật sau mỗi lần chạy)']);
+    assert.ok(ex.getProtections('RANGE').some((p) => p.getDescription() === 'Kết quả loại trừ (script tự ghi)'));
+    ex.getRange('A2:C4').setValues([['An Ninh', 'kênh an ninh', ''], ['', '', 'kết quả cũ'], ['  vtv  ', '', '']]);
+    gas.post({ token, action: 'save', ...savePayload(), exclude: [{ entry: 'An Ninh', text: '2 link: ANTV' }, { entry: 'vtv', text: '=7 link' }] });
+    assert.deepEqual(ex.getRange('C2:C4').getValues().map((r) => r[0]), ['2 link: ANTV', '', '=7 link']);
+    assert.equal(ex.getRange('B2').getValue(), 'kênh an ninh'); // notes untouched
+  });
   test('save 12,000 dòng (vượt 1,000 dòng mặc định của sheet)', () => {
     const { gas, token } = ready();
     const p = savePayload();
@@ -199,10 +210,12 @@ describe('Code.gs — Chạy ngay và tự chạy khi sửa cấu hình', () => 
     assert.equal(gas.fetches.filter((f) => f.opts.method === 'post').length, 1);
     assert.equal(gas.triggers.filter((t) => t.handler === 'scheduledRun').length, 0);
   });
-  test('sửa cột hướng dẫn, ô lịch / trạng thái / thông báo hoặc khối kết quả → không chạy lại', () => {
+  test('sửa cột hướng dẫn, ô lịch / trạng thái / thông báo, khối kết quả, ghi chú / "Đang bỏ" của Exclude → không chạy lại', () => {
     const { gas } = ready();
     gas.edit('Config', 'C3');
     for (const a1 of ['B7', 'B8', 'B9', 'B12']) gas.edit('Config', a1);
+    gas.edit('Exclude', 'B2');
+    gas.edit('Exclude', 'C2');
     assert.equal(gas.triggers.filter((t) => t.handler === 'scheduledRun').length, 0);
   });
 });

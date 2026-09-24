@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { buildList, configHash, countryOf, normalizeConfig, parseLevel, qualityOf } from '../source.js';
+import { buildList, configHash, countryOf, excludeReport, excludeRules, foldText, normalizeConfig, parseLevel, qualityOf, wordsOf } from '../source.js';
 
 const source = {
   channels: [
@@ -12,6 +12,8 @@ const source = {
     { id: 'Adult.vn', country: 'VN', categories: ['xxx'], is_nsfw: true, closed: null },
     { id: 'ThaiPBS.th', country: 'TH', categories: ['news'], is_nsfw: false, closed: null },
     { id: 'BBCOne.uk', country: 'UK', categories: ['general'], is_nsfw: false, closed: null },
+    { id: 'AnNinhTV.vn', name: 'ANTV', alt_names: ['An Ninh Truyền Hình'], country: 'VN', categories: ['news'], is_nsfw: false, closed: null },
+    { id: 'DongThapTV1.vn', name: 'Đồng Tháp TV1', country: 'VN', categories: ['general'], is_nsfw: false, closed: null },
   ],
   feeds: [
     { channel: 'VTV1.vn', id: 'HD', languages: ['vie'], is_main: true },
@@ -36,6 +38,17 @@ const source = {
     { channel: null, feed: null, title: 'Unknown', url: 'https://d/unknown.m3u8', quality: null, labels: [], referrer: null, user_agent: null },
   ],
 };
+// Extra channels for the Exclude tests (kept out of the list assertions above).
+const withNews = {
+  ...source,
+  streams: [
+    ...source.streams,
+    { channel: 'AnNinhTV.vn', feed: 'HD', title: 'ANTV', url: 'https://liveh12.vtvprime.vn/hls/ANNINHTV/index.m3u8', quality: '720p', labels: [], referrer: null, user_agent: null },
+    { channel: 'AnNinhTV.vn', feed: 'HD', title: 'ANTV backup', url: 'https://e/antv-2.m3u8', quality: '576p', labels: [], referrer: null, user_agent: null },
+    { channel: 'DongThapTV1.vn', feed: 'HD', title: 'Đồng Tháp TV1', url: 'https://f/dongthap.m3u8', quality: '720p', labels: [], referrer: null, user_agent: null },
+  ],
+};
+const vn = normalizeConfig({ countries: 'VN' });
 const urls = (list) => list.map((s) => s.url);
 
 describe('buildList', () => {
@@ -69,9 +82,79 @@ describe('buildList', () => {
     assert.ok(urls(buildList(source, normalizeConfig({}))).includes('https://d/unknown.m3u8'));
     assert.ok(!urls(buildList(source, normalizeConfig({ languages: 'eng' }))).includes('https://d/unknown.m3u8'));
   });
-  test('danh sách Exclude bị bỏ qua; URL tốt kế tiếp được chọn', () => {
-    const list = buildList(source, normalizeConfig({ countries: 'VN' }), new Set(['https://a/vtv1-1080.m3u8']));
+  test('Exclude bằng link đầy đủ: chỉ bỏ đúng link đó; link tốt kế tiếp của kênh được chọn', () => {
+    const list = buildList(source, vn, new Set(['https://a/vtv1-1080.m3u8']));
     assert.equal(list[0].url, 'https://a/vtv1-1080b.m3u8');
+    // a link that is only a prefix does not count as the same link
+    assert.equal(buildList(source, vn, new Set(['https://a/vtv1-1080']))[0].url, 'https://a/vtv1-1080.m3u8');
+  });
+  test('Exclude bằng chữ: "An Ninh" bỏ cả kênh AnNinhTV.vn (mọi link), không phân biệt hoa thường / khoảng trắng', () => {
+    const before = urls(buildList(withNews, vn));
+    assert.ok(before.includes('https://liveh12.vtvprime.vn/hls/ANNINHTV/index.m3u8'));
+    for (const text of ['An Ninh', 'an ninh', 'ANNINH', 'An-Ninh', 'an ninh tv']) {
+      const after = urls(buildList(withNews, vn, new Set([text])));
+      assert.ok(!after.some((u) => /antv|ANNINHTV/i.test(u)), text);
+      assert.equal(after.length, before.length - 1, text);
+    }
+  });
+  test('Exclude bằng chữ: không phân biệt dấu, khớp tên / tên khác / mã kênh', () => {
+    const left = (text) => urls(buildList(withNews, vn, new Set([text])));
+    assert.ok(!left('dong thap').includes('https://f/dongthap.m3u8')); // "Đồng Tháp TV1"
+    assert.ok(!left('Truyền Hình').some((u) => /antv|ANNINHTV/i.test(u))); // alt_names
+    assert.ok(!left('AnNinhTV.vn').some((u) => /antv|ANNINHTV/i.test(u))); // channel ID
+    assert.deepEqual(left('VTV3'), urls(buildList(withNews, vn)).filter((u) => u !== 'https://a/vtv3.m3u8'));
+  });
+  test('chữ thường không so với link ("VTV" không bỏ ANTV dù link ở vtvprime.vn); tên miền / một phần link thì có', () => {
+    const left = (text) => urls(buildList(withNews, vn, new Set([text])));
+    assert.ok(left('VTV').includes('https://liveh12.vtvprime.vn/hls/ANNINHTV/index.m3u8'));
+    assert.ok(!left('vtvprime.vn').includes('https://liveh12.vtvprime.vn/hls/ANNINHTV/index.m3u8'));
+    assert.ok(!left('vtvprime.vn/hls/ANNINHTV').includes('https://liveh12.vtvprime.vn/hls/ANNINHTV/index.m3u8'));
+    assert.ok(left('vtvprime.vn').includes('https://e/antv-2.m3u8')); // the backup link is elsewhere
+  });
+  test('Exclude chữ quá ngắn (< 3 chữ/số) bị bỏ qua để "TV" không xoá hết', () => {
+    assert.equal(buildList(withNews, vn, new Set(['TV', ' . '])).length, buildList(withNews, vn).length);
+  });
+  test('báo cáo cột "Đang bỏ": số link + tên kênh mỗi dòng', () => {
+    const rules = excludeRules(['An Ninh', 'VTV', 'TV', 'Không có kênh này', 'https://x/khong-co.m3u8']);
+    buildList(withNews, vn, rules);
+    assert.deepEqual(excludeReport(rules), [
+      { entry: 'An Ninh', text: '2 link: ANTV' },
+      { entry: 'VTV', text: '6 link: VTV1.vn, VTV3.vn' },
+      { entry: 'TV', text: 'Chưa dùng: cần ít nhất 3 chữ hoặc số' },
+      { entry: 'Không có kênh này', text: 'Không khớp kênh nào' },
+      { entry: 'https://x/khong-co.m3u8', text: 'Không khớp link nào (link phải giống hệt)' },
+    ]);
+  });
+  test('chữ phải bắt đầu ở đầu một từ: "VTV" không khớp "Lao SV TV", "HTV" không khớp "An Ninh TV"', () => {
+    const src = {
+      ...source,
+      channels: [...source.channels, { id: 'LaoSVTV.vn', name: 'Lao SV TV', country: 'VN', categories: ['general'] }],
+      streams: [...withNews.streams, { channel: 'LaoSVTV.vn', feed: 'SD', title: 'Lao SV TV', url: 'https://g/laosv.m3u8', quality: '', labels: [] }],
+    };
+    const left = (text) => urls(buildList(src, vn, new Set([text])));
+    assert.ok(left('VTV').includes('https://g/laosv.m3u8'));
+    assert.ok(!left('lao sv').includes('https://g/laosv.m3u8'));
+    assert.ok(left('HTV').includes('https://liveh12.vtvprime.vn/hls/ANNINHTV/index.m3u8'));
+    assert.ok(!left('ninh tv').includes('https://liveh12.vtvprime.vn/hls/ANNINHTV/index.m3u8')); // từ giữa tên cũng được
+  });
+  test('chữ kết thúc bằng số khớp trọn số: "VTV1" không bỏ VTV10', () => {
+    const src = {
+      ...source,
+      channels: [...source.channels, { id: 'VTV10.vn', name: 'VTV10', country: 'VN', categories: ['general'] }],
+      streams: [...source.streams, { channel: 'VTV10.vn', feed: 'SD', title: 'VTV10', url: 'https://h/vtv10.m3u8', quality: '', labels: [] }],
+    };
+    const left = urls(buildList(src, vn, new Set(['VTV1'])));
+    assert.ok(left.includes('https://h/vtv10.m3u8'));
+    assert.ok(!left.some((u) => u.includes('/vtv1-')));
+  });
+  test('wordsOf: tách chữ hoa kiểu AnNinhTV, bỏ dấu', () => {
+    assert.deepEqual(wordsOf('AnNinhTV.vn'), ['an', 'ninh', 'tv', 'vn']);
+    assert.deepEqual(wordsOf('Đồng Tháp TV1'), ['dong', 'thap', 'tv1']);
+    assert.deepEqual(wordsOf('VTVcab 1'), ['vtvcab', '1']);
+  });
+  test('foldText: bỏ dấu, đ → d, bỏ khoảng trắng / dấu câu', () => {
+    assert.equal(foldText('Đồng Tháp TV-1'), 'dongthaptv1');
+    assert.equal(foldText('AnNinhTV.vn'), 'anninhtvvn');
   });
   test('tên quốc gia tiếng Việt + cờ', () => {
     const [s] = buildList(source, normalizeConfig({ countries: 'VN' }));
