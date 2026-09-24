@@ -408,9 +408,9 @@ describe('Code.gs — dashboard (trạng thái, Chạy ngay, mã thao tác)', ()
     return { gas, code: gas.props.get('DASHBOARD_CODE') };
   }
 
-  test('setup tạo mã thao tác 8 ký tự dễ đọc (không có I, O, 0, 1)', () => {
+  test('setup tạo mã thao tác 8 ký tự dễ đọc (không có I, O, 0, 1), dạng ABCD-EFGH', () => {
     const { code } = withCode();
-    assert.match(code, /^[A-HJ-NP-Z2-9]{8}$/);
+    assert.match(code, /^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/);
   });
   test('trạng thái: ai cũng xem được, không gọi GitHub', () => {
     const { gas } = withCode();
@@ -428,7 +428,7 @@ describe('Code.gs — dashboard (trạng thái, Chạy ngay, mã thao tác)', ()
     const wrong = gas.post({ action: 'run', code: 'WRONG123' });
     assert.deepEqual([wrong.ok, wrong.error, wrong.message], [false, 'bad_code', 'Mã thao tác không đúng.']);
     assert.equal(posts(gas), 0);
-    const res = gas.post({ action: 'run', code: `${code.slice(0, 4)}-${code.slice(4)}`.toLowerCase() });
+    const res = gas.post({ action: 'run', code: code.replace('-', '').toLowerCase() });
     assert.equal(res.ok, true);
     assert.equal(res.status.run.phase, 'queued');
     assert.equal(posts(gas), 1);
@@ -507,19 +507,55 @@ describe('Code.gs — dashboard (trạng thái, Chạy ngay, mã thao tác)', ()
     gas.get({ action: 'status' });
     assert.equal(gas.triggers.filter((t) => t.handler === 'autoRun').length, 1);
   });
-  test('menu Mã thao tác: hiện mã dạng ABCD-EFGH; Đổi mã → mã cũ hết hiệu lực', () => {
+  test('menu Mã thao tác: hiện mã dạng ABCD-EFGH', () => {
     const { gas, code } = withCode();
     gas.withUi();
     gas.ctx.showDashboardCode();
     assert.equal(gas.dialogs.at(-1).title, 'Mã thao tác dashboard');
-    assert.ok(gas.dialogs.at(-1).html.includes(`value="${code.slice(0, 4)}-${code.slice(4)}"`));
-    gas.ctx.resetDashboardCode(); // answered "OK", not "YES" → unchanged
-    assert.equal(gas.props.get('DASHBOARD_CODE'), code);
-    gas.ctx.__uiAnswer = 'YES';
-    gas.ctx.resetDashboardCode();
-    const fresh = gas.props.get('DASHBOARD_CODE');
-    assert.notEqual(fresh, code);
-    assert.equal(gas.post({ action: 'run', code }).error, 'bad_code');
-    assert.equal(gas.post({ action: 'run', code: fresh }).ok, true);
+    assert.ok(gas.dialogs.at(-1).html.includes(`value="${code}"`));
+  });
+  describe('tự đặt mã (menu Đặt / đổi mã thao tác)', () => {
+    const setCode = (gas, answer) => {
+      gas.withUi();
+      gas.ctx.__prompt = answer;
+      gas.ctx.setDashboardCode();
+    };
+    test('mã tự chọn → dùng được, không phân biệt hoa thường / dấu gạch; mã cũ hết hiệu lực', () => {
+      const { gas, code } = withCode();
+      setCode(gas, { button: 'OK', text: '  Vulcan 2026 ' });
+      assert.equal(gas.props.get('DASHBOARD_CODE'), 'VULCAN 2026');
+      assert.ok(gas.dialogs.at(-1).html.includes('value="VULCAN 2026"'));
+      assert.equal(gas.post({ action: 'run', code }).error, 'bad_code');
+      assert.equal(gas.post({ action: 'run', code: 'vulcan-2026' }).ok, true);
+    });
+    test('mã giữ nguyên qua Cài đặt ban đầu', () => {
+      const { gas } = withCode();
+      setCode(gas, { button: 'OK', text: 'MKT-TEAM-01' });
+      gas.ctx.setup();
+      assert.equal(gas.props.get('DASHBOARD_CODE'), 'MKT-TEAM-01');
+    });
+    test('mã không hợp lệ → báo lỗi, giữ mã cũ', () => {
+      const { gas, code } = withCode();
+      for (const text of ['abc12', 'mã số 2026', 'abc!2026', '111111', '123456', '987654', 'A'.repeat(33)]) {
+        setCode(gas, { button: 'OK', text });
+        assert.match(gas.dialogs.at(-1).alert, /Mã cũ vẫn giữ nguyên/, text);
+        assert.equal(gas.props.get('DASHBOARD_CODE'), code, text);
+      }
+    });
+    test('để trống → tạo mã ngẫu nhiên mới; bấm Huỷ → không đổi', () => {
+      const { gas, code } = withCode();
+      setCode(gas, { button: 'CANCEL', text: 'ABCDEF123' });
+      assert.equal(gas.props.get('DASHBOARD_CODE'), code);
+      setCode(gas, { button: 'OK', text: '' });
+      const fresh = gas.props.get('DASHBOARD_CODE');
+      assert.notEqual(fresh, code);
+      assert.match(fresh, /^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/);
+    });
+    test('đặt mã mới xoá bộ đếm nhập sai', () => {
+      const { gas } = withCode();
+      for (let i = 0; i < 10; i++) gas.post({ action: 'run', code: `BAD${i}` });
+      setCode(gas, { button: 'OK', text: 'NEWCODE-26' });
+      assert.equal(gas.post({ action: 'run', code: 'newcode26' }).ok, true);
+    });
   });
 });
