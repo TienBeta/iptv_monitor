@@ -298,9 +298,9 @@ table {
   border-spacing: 0;
   table-layout: fixed;
 }
-.col-name { width: 28%; }
-.col-country { width: 13%; }
-.col-status { width: 23%; }
+.col-name { width: 24%; }
+.col-country { width: 12%; }
+.col-status { width: 27%; }
 .col-time { width: 152px; }
 .col-link { width: auto; }
 

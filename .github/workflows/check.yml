@@ -66,6 +66,11 @@ jobs:
         run: |
           mkdir -p public
           cp -r site/. public/
+          # Pages lets browsers cache files for 10 minutes: version the CSS/JS
+          # links so a new index.html never runs with an old cached app.js/style.css.
+          v=$(cat site/app.js site/style.css | sha256sum | cut -c1-10)
+          sed -i -E "s/(href|src)=\"(style\.css|app\.js)\"/\1=\"\2?v=${v}\"/" public/index.html
+          grep -q "app.js?v=${v}" public/index.html && grep -q "style.css?v=${v}" public/index.html
           cp dist/results.json public/
           touch public/.nojekyll
           cd public

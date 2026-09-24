@@ -61,6 +61,8 @@
   function icon(path) {
     const svg = document.createElementNS(SVG_NS, 'svg');
     svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('width', '16');
+    svg.setAttribute('height', '16');
     svg.setAttribute('aria-hidden', 'true');
     const p = document.createElementNS(SVG_NS, 'path');
     p.setAttribute('d', path);
