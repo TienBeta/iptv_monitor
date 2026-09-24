@@ -207,6 +207,10 @@ export async function runMonitor({ env = process.env, checkOptions = {}, io = {}
     counts,
     unchecked,
     durationSec,
+    // The dashboard calls this Apps Script web app for "Chạy ngay", run status and the
+    // schedule. Knowing the URL is not enough to read the Sheet (load/save need the
+    // bridge token; run/schedule need the operator code).
+    ...(bridgeUrl ? { controlUrl: bridgeUrl.trim() } : {}),
     streams: rows.map((r) => ({
       title: r.title,
       channel: r.channel,

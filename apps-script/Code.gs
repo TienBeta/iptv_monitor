@@ -8,6 +8,9 @@
  * - Ô tick "Chạy ngay" trong Config, hoặc menu IPTV Monitor → Chạy ngay:
  *   gọi GitHub API để chạy workflow ngay.
  * - Sửa Config / Exclude: tự hẹn chạy lại sau khoảng 1 phút.
+ * - Lịch tự chạy: trigger autoRun (mỗi 10 phút) chạy workflow đúng các giờ đã hẹn.
+ * - Dashboard: xem trạng thái (doGet ?action=status, ai cũng xem được);
+ *   "Chạy ngay" và đổi lịch (doPost run / schedule) cần mã thao tác.
  *
  * Cài đặt từng bước: docs/setup.md trong repo.
  */
@@ -26,6 +29,16 @@ const JUST_SENT_MS = 2 * 60 * 1000; // after a dispatch, GitHub may take a few s
 const SUMMARY_ROW = 10;
 const ACTIONS_URL = 'https://github.com/' + GITHUB_REPO + '/actions/workflows/' + WORKFLOW_FILE;
 const WATCH_MAX_MS = 3 * 60 * 60 * 1000;
+const SCHEDULE_HOURS = [1, 2, 3, 4, 6, 8, 12, 24];
+// Same times as the old GitHub cron (17 */3 * * * UTC): 01:00, 04:00, … giờ Việt Nam.
+const DEFAULT_SCHEDULE = { enabled: true, everyHours: 3, startHour: 1 };
+const TICK_MINUTES = 10;
+const HOUR_MS = 60 * 60 * 1000;
+const VN_OFFSET_MS = 7 * HOUR_MS; // Việt Nam: UTC+7, không đổi giờ theo mùa
+const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 32 ký tự, bỏ I/O/0/1 dễ nhầm
+const CODE_MAX_FAILS = 10;
+const CODE_LOCK_MS = 15 * 60 * 1000;
+const DASHBOARD_URL = 'https://' + GITHUB_REPO.split('/')[0].toLowerCase() + '.github.io/' + GITHUB_REPO.split('/')[1] + '/';
 const STREAMS_HEADER = ['Tên kênh', 'Kênh', 'Quốc gia', 'Link', 'Trạng thái', 'Lý do', 'Kiểm tra lúc'];
 const LEVEL_OPTIONS = [
   '1 - Link có phản hồi',
@@ -53,6 +66,8 @@ function onOpen() {
     .addItem('Cài đặt ban đầu', 'setup')
     .addItem('Nhập GitHub token', 'setGithubToken')
     .addItem('Xem bridge token', 'showBridgeToken')
+    .addItem('Mã thao tác dashboard', 'showDashboardCode')
+    .addItem('Đổi mã thao tác dashboard', 'resetDashboardCode')
     .addToUi();
 }
 
@@ -117,6 +132,86 @@ function tokenCode_(token) {
     .slice(0, 3).map(function (b) { return ('0' + (b & 0xff).toString(16)).slice(-2); }).join('').toUpperCase();
 }
 
+// The operator code lets the dashboard start a run and change the schedule.
+function showDashboardCode() {
+  const code = PropertiesService.getScriptProperties().getProperty('DASHBOARD_CODE') || saveNewCode_();
+  showCodeDialog_(code);
+}
+
+function resetDashboardCode() {
+  const ui = SpreadsheetApp.getUi();
+  const answer = ui.alert('Đổi mã thao tác dashboard?',
+    'Mã cũ hết hiệu lực ngay; ai đã lưu mã cũ trên dashboard sẽ phải nhập mã mới.', ui.ButtonSet.YES_NO);
+  if (answer !== ui.Button.YES) return;
+  showCodeDialog_(saveNewCode_());
+}
+
+function showCodeDialog_(code) {
+  const html = HtmlService.createHtmlOutput(
+    '<div style="font:14px Arial,sans-serif;line-height:1.5">' +
+    '<p>Nhập mã này trên dashboard khi bấm <b>Chạy ngay</b> hoặc đổi <b>Lịch chạy</b>. ' +
+    'Xem trạng thái thì không cần mã.</p>' +
+    copyBox_('c', formatCode_(code)) +
+    '<p>Dashboard: <a href="' + DASHBOARD_URL + '" target="_blank">' + DASHBOARD_URL + '</a></p>' +
+    '<p style="color:#5f6368">Chỉ gửi mã cho người được phép chạy kiểm tra. Lộ mã thì dùng menu ' +
+    '<b>Đổi mã thao tác dashboard</b>.</p>' +
+    '<script>function cp(id){var e=document.getElementById(id);e.select();' +
+    'try{navigator.clipboard.writeText(e.value)}catch(x){}document.execCommand("copy");' +
+    'document.getElementById(id+"s").textContent="Đã copy";}</script></div>',
+  ).setWidth(480).setHeight(280);
+  try {
+    SpreadsheetApp.getUi().showModalDialog(html, 'Mã thao tác dashboard');
+  } catch (err) {
+    Logger.log(formatCode_(code)); // run from the editor: no UI
+  }
+}
+
+function saveNewCode_() {
+  const code = newCode_();
+  const props = PropertiesService.getScriptProperties();
+  props.setProperty('DASHBOARD_CODE', code);
+  props.deleteProperty('CODE_FAILS');
+  return code;
+}
+
+// 8 characters from a 32-letter alphabet, from UUID randomness (Math.random is not for secrets).
+function newCode_() {
+  const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,
+    Utilities.getUuid() + Utilities.getUuid(), Utilities.Charset.UTF_8);
+  let code = '';
+  for (let i = 0; i < 8; i++) code += CODE_CHARS.charAt((bytes[i] + 256) % 32);
+  return code;
+}
+
+function formatCode_(code) {
+  return code.slice(0, 4) + '-' + code.slice(4);
+}
+
+function normalizeCode_(value) {
+  return String(value || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+// Wrong codes are counted; after CODE_MAX_FAILS in CODE_LOCK_MS every code is
+// refused until the window ends, so the code cannot be guessed by trying.
+function checkCode_(given) {
+  const props = PropertiesService.getScriptProperties();
+  const code = props.getProperty('DASHBOARD_CODE');
+  if (!code) {
+    return { error: 'no_code', message: 'Sheet chưa có mã thao tác — chủ Sheet mở menu IPTV Monitor → Mã thao tác dashboard.' };
+  }
+  const now = Date.now();
+  let fails = JSON.parse(props.getProperty('CODE_FAILS') || 'null');
+  if (!fails || now - fails.since > CODE_LOCK_MS) fails = { n: 0, since: now };
+  if (fails.n >= CODE_MAX_FAILS) {
+    const minutes = Math.max(1, Math.ceil((fails.since + CODE_LOCK_MS - now) / 60000));
+    return { error: 'locked', message: 'Nhập sai mã quá nhiều lần — thử lại sau ' + minutes + ' phút.' };
+  }
+  if (normalizeCode_(given) === code) return null;
+  fails.n++;
+  props.setProperty('CODE_FAILS', JSON.stringify(fails));
+  return { error: 'bad_code', message: 'Mã thao tác không đúng.' };
+}
+
 // ---------------------------------------------------------------- setup
 
 function setup() {
@@ -130,11 +225,15 @@ function setup() {
 
   const props = PropertiesService.getScriptProperties();
   if (!props.getProperty('BRIDGE_TOKEN')) props.setProperty('BRIDGE_TOKEN', newToken_());
+  if (!props.getProperty('DASHBOARD_CODE')) saveNewCode_();
   installEditTrigger_(ss);
+  ensureScheduleTrigger_();
   ss.setActiveSheet(ss.getSheetByName(SHEET.config));
 
   alert_('Cài đặt xong.\n\nBridge token (dán vào GitHub secret SHEET_BRIDGE_TOKEN):\n\n' +
     props.getProperty('BRIDGE_TOKEN') +
+    '\n\nMã thao tác dashboard (Chạy ngay / đổi lịch): ' + formatCode_(props.getProperty('DASHBOARD_CODE')) +
+    '\nLịch tự chạy: ' + scheduleText_(readSchedule_()) +
     '\n\nBước tiếp theo: Deploy → New deployment → Web app (xem docs/setup.md).');
 }
 
@@ -152,7 +251,7 @@ function setupConfigSheet_(ss) {
     ]);
     sh.getRange('A9').setValue('LẦN CHẠY GẦN NHẤT');
   }
-  if (sh.getRange(PROGRESS_ROW, 2).getValue() === '') setProgress_('Sẵn sàng', ACTIONS_URL, 'idle');
+  if (sh.getRange(PROGRESS_ROW, 2).getValue() === '') setProgress_('Sẵn sàng', ACTIONS_URL, 'idle', { phase: 'idle' });
   sh.getRange('B6').setDataValidation(SpreadsheetApp.newDataValidation()
     .requireValueInList(LEVEL_OPTIONS, true).setAllowInvalid(false).build());
   sh.getRange(CELL.runNow).insertCheckboxes();
@@ -275,15 +374,30 @@ function scheduledRun() {
     : msg);
 }
 
-// "Chạy ngay": refused while a run is queued or running (manual or scheduled),
-// so repeated clicks never pile up runs.
+// "Chạy ngay" from the Sheet: refused while a run is queued or running.
 function requestRun_() {
-  const active = activeRun_();
-  if (active) {
-    watchRun_(active);
-    return 'Đang có một lần chạy — đợi dòng "Trạng thái" báo Xong rồi hãy bấm lại.';
+  const r = tryRun_();
+  if (r.busy) return 'Đang có một lần chạy — đợi dòng "Trạng thái" báo Xong rồi hãy bấm lại.';
+  if (r.error) return 'Không gửi được yêu cầu chạy: ' + r.error;
+  return sentMessage_();
+}
+
+// The one place that starts a run for "Chạy ngay" (Sheet, dashboard) and the
+// schedule: refused while a run is queued or running (from anywhere), so
+// repeated clicks never pile up runs. Returns { ok } / { busy } / { error }.
+function tryRun_() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) return { ok: false, busy: true }; // a save holds the lock: a run is on
+  try {
+    const active = activeRun_();
+    if (active) {
+      watchRun_(active);
+      return { ok: false, busy: true };
+    }
+    return dispatch_();
+  } finally {
+    lock.releaseLock();
   }
-  return dispatchSafe_();
 }
 
 function deleteTriggers_(handler) {
@@ -293,18 +407,28 @@ function deleteTriggers_(handler) {
 }
 
 function dispatchSafe_() {
+  const r = dispatch_();
+  return r.error ? 'Không gửi được yêu cầu chạy: ' + r.error : sentMessage_();
+}
+
+function dispatch_() {
   try {
     dispatchWorkflow_();
   } catch (err) {
-    return 'Không gửi được yêu cầu chạy: ' + err.message;
+    return { ok: false, error: err.message };
   }
   try {
     startWatch_();
   } catch (err) {
-    setProgress_('Không theo dõi được trạng thái: ' + err.message, ACTIONS_URL, 'error');
+    const msg = 'Không theo dõi được trạng thái: ' + err.message;
+    setProgress_(msg, ACTIONS_URL, 'error', { phase: 'error', message: msg });
   }
-  return 'Đã gửi yêu cầu chạy lúc ' + Utilities.formatDate(new Date(), 'Asia/Ho_Chi_Minh', 'HH:mm dd/MM/yyyy') +
-    '. Xem dòng "Trạng thái" bên dưới.';
+  return { ok: true };
+}
+
+function sentMessage_(from) {
+  return 'Đã gửi yêu cầu chạy' + (from || '') + ' lúc ' +
+    Utilities.formatDate(new Date(), 'Asia/Ho_Chi_Minh', 'HH:mm dd/MM/yyyy') + '. Xem dòng "Trạng thái" bên dưới.';
 }
 
 function dispatchWorkflow_() {
@@ -363,8 +487,9 @@ function activeRun_() {
 
 // After "Chạy ngay": check GitHub every minute and mirror the run's status.
 function startWatch_() {
-  saveWatch_({ since: Date.now() });
-  setProgress_('⏳ Đang chờ GitHub bắt đầu chạy…', ACTIONS_URL, 'busy');
+  const now = Date.now();
+  saveWatch_({ since: now });
+  setProgress_('⏳ Đang chờ GitHub bắt đầu chạy…', ACTIONS_URL, 'busy', { phase: 'queued', since: now });
   ensureWatchTrigger_();
 }
 
@@ -380,6 +505,10 @@ function watchRun_(run) {
 function watchRun() {
   const watch = readWatch_();
   if (!watch || Date.now() - watch.since > WATCH_MAX_MS) {
+    if (watch) {
+      const msg = 'Quá 3 giờ chưa thấy kết quả lần chạy — xem trên GitHub';
+      setProgress_(msg, ACTIONS_URL, 'error', { phase: 'error', message: msg });
+    }
     stopWatch_();
     return;
   }
@@ -387,7 +516,8 @@ function watchRun() {
   try {
     runs = recentRuns_();
   } catch (err) {
-    setProgress_('Không đọc được trạng thái từ GitHub: ' + err.message, ACTIONS_URL, 'error');
+    const msg = 'Không đọc được trạng thái từ GitHub: ' + err.message;
+    setProgress_(msg, ACTIONS_URL, 'error', { phase: 'error', message: msg });
     return;
   }
   const run = watch.runId
@@ -395,7 +525,8 @@ function watchRun() {
     : runs.find(function (r) { return createdAt_(r) >= watch.since - 60 * 1000; });
   if (!run) {
     if (Date.now() - watch.since > 15 * 60 * 1000) {
-      setProgress_('GitHub chưa bắt đầu chạy sau 15 phút — bấm link bên cạnh để xem', ACTIONS_URL, 'error');
+      setProgress_('GitHub chưa bắt đầu chạy sau 15 phút — bấm link bên cạnh để xem', ACTIONS_URL, 'error',
+        { phase: 'error', message: 'GitHub chưa bắt đầu chạy sau 15 phút' });
       stopWatch_();
     }
     return;
@@ -409,20 +540,28 @@ function watchRun() {
 }
 
 function showRun_(run) {
+  const started = new Date(run.run_started_at || run.created_at || Date.now());
   if (run.status !== 'completed') {
     if (run.status === 'in_progress') {
-      const started = new Date(run.run_started_at || run.created_at);
       const minutes = Math.max(0, Math.round((Date.now() - started.getTime()) / 60000));
-      setProgress_('⏳ Đang chạy… (bắt đầu ' + hhmm_(started) + ', đã ' + minutes + ' phút)', run.html_url, 'busy');
+      setProgress_('⏳ Đang chạy… (bắt đầu ' + hhmm_(started) + ', đã ' + minutes + ' phút)', run.html_url, 'busy',
+        { phase: 'running', startedAt: started.getTime() });
     } else {
-      setProgress_('⏳ Đang chờ GitHub bắt đầu chạy…', run.html_url, 'busy');
+      setProgress_('⏳ Đang chờ GitHub bắt đầu chạy…', run.html_url, 'busy', { phase: 'queued', since: started.getTime() });
     }
     return;
   }
-  const at = hhmm_(new Date(run.updated_at || Date.now()));
-  if (run.conclusion === 'success') setProgress_('✓ Xong lúc ' + at + ' — có thể bấm Chạy ngay lại', run.html_url, 'ok');
-  else if (run.conclusion === 'cancelled') setProgress_('Đã huỷ lúc ' + at, run.html_url, 'idle');
-  else setProgress_('✗ Lỗi lúc ' + at + ' — bấm link bên cạnh để xem nguyên nhân', run.html_url, 'error');
+  const finished = new Date(run.updated_at || Date.now());
+  const at = hhmm_(finished);
+  const times = { startedAt: started.getTime(), finishedAt: finished.getTime() };
+  if (run.conclusion === 'success') {
+    setProgress_('✓ Xong lúc ' + at + ' — có thể bấm Chạy ngay lại', run.html_url, 'ok', Object.assign({ phase: 'success' }, times));
+  } else if (run.conclusion === 'cancelled') {
+    setProgress_('Đã huỷ lúc ' + at, run.html_url, 'idle', Object.assign({ phase: 'cancelled' }, times));
+  } else {
+    setProgress_('✗ Lỗi lúc ' + at + ' — bấm link bên cạnh để xem nguyên nhân', run.html_url, 'error',
+      Object.assign({ phase: 'failure' }, times));
+  }
 }
 
 function ensureWatchTrigger_() {
@@ -454,7 +593,11 @@ function createdAt_(run) {
   return new Date(run.created_at).getTime();
 }
 
-function setProgress_(text, url, tone) {
+// Run status: Config row 8 for the Sheet, RUN_STATE (phase + times) for the dashboard.
+// phase: idle | queued | running | success | failure | cancelled | error
+function setProgress_(text, url, tone, state) {
+  PropertiesService.getScriptProperties().setProperty('RUN_STATE',
+    JSON.stringify(Object.assign({ phase: 'idle' }, state, { url: url || ACTIONS_URL, at: Date.now() })));
   const sh = SpreadsheetApp.getActive().getSheetByName(SHEET.config);
   if (!sh) return;
   sh.getRange(PROGRESS_ROW, 1, 1, 2).setValues([['Trạng thái', text]]);
@@ -472,15 +615,176 @@ function setMessage_(msg) {
   if (sh) sh.getRange(CELL.message).setValue(msg);
 }
 
+// ---------------------------------------------------------------- lịch tự chạy
+
+function readSchedule_() {
+  const raw = PropertiesService.getScriptProperties().getProperty('SCHEDULE');
+  const s = raw ? JSON.parse(raw) : DEFAULT_SCHEDULE;
+  return {
+    enabled: s.enabled !== false,
+    everyHours: SCHEDULE_HOURS.indexOf(Number(s.everyHours)) >= 0 ? Number(s.everyHours) : DEFAULT_SCHEDULE.everyHours,
+    startHour: validHour_(s.startHour) ? Number(s.startHour) : DEFAULT_SCHEDULE.startHour,
+  };
+}
+
+function validHour_(h) {
+  const n = Number(h);
+  return h !== '' && h !== null && n >= 0 && n <= 23 && Math.floor(n) === n;
+}
+
+function saveSchedule_(input) {
+  input = input || {};
+  if (SCHEDULE_HOURS.indexOf(Number(input.everyHours)) < 0) throw new Error('Chu kỳ chạy không hợp lệ.');
+  if (!validHour_(input.startHour)) throw new Error('Giờ bắt đầu không hợp lệ.');
+  const s = { enabled: input.enabled !== false, everyHours: Number(input.everyHours), startHour: Number(input.startHour) };
+  const props = PropertiesService.getScriptProperties();
+  props.setProperty('SCHEDULE', JSON.stringify(s));
+  // The new plan starts at its next time, not with a catch-up run right now.
+  props.setProperty('AUTO_SLOT', String(slotAt_(s, Date.now(), false)));
+  ensureScheduleTrigger_();
+  setMessage_('Lịch tự chạy: ' + scheduleText_(s) + ' (đổi lúc ' + hhmm_(new Date()) + ').');
+  return s;
+}
+
+// Hours of the day (Việt Nam) with a run, e.g. every 3 h from 01:00 → [1, 4, 7, …, 22].
+function slotHours_(s) {
+  const hours = [];
+  for (let h = s.startHour % s.everyHours; h < 24; h += s.everyHours) hours.push(h);
+  return hours;
+}
+
+// Start (ms) of the latest run time at or before `now`, or (after = true) the first one after it.
+function slotAt_(s, now, after) {
+  const hours = slotHours_(s);
+  const hour = Math.floor((now + VN_OFFSET_MS) / HOUR_MS); // whole hours since 1970, Việt Nam time
+  for (let i = 0; i <= 24; i++) {
+    const h = after ? hour + 1 + i : hour - i;
+    if (hours.indexOf(h % 24) >= 0) return h * HOUR_MS - VN_OFFSET_MS;
+  }
+  return 0;
+}
+
+// When the next scheduled run should start: the current time if the trigger has not served it yet.
+function nextRunAt_(s, now) {
+  if (!s.enabled) return null;
+  const slot = slotAt_(s, now, false);
+  const served = Number(PropertiesService.getScriptProperties().getProperty('AUTO_SLOT') || 0);
+  return slot > served && now - slot <= HOUR_MS ? slot : slotAt_(s, now, true);
+}
+
+function scheduleText_(s) {
+  if (!s.enabled) return 'đang tắt';
+  const hours = slotHours_(s).map(function (h) { return ('0' + h).slice(-2) + ':00'; });
+  return 'mỗi ' + s.everyHours + ' giờ' + (hours.length <= 8 ? ' (' + hours.join(', ') + ')' : ', từ ' + hours[0]);
+}
+
+// Idempotent; also drops duplicates (several dashboards opened at once right after an update).
+function ensureScheduleTrigger_() {
+  const mine = ScriptApp.getProjectTriggers().filter(function (t) { return t.getHandlerFunction() === 'autoRun'; });
+  if (!mine.length) ScriptApp.newTrigger('autoRun').timeBased().everyMinutes(TICK_MINUTES).create();
+  mine.slice(1).forEach(function (t) { ScriptApp.deleteTrigger(t); });
+}
+
+// Time trigger (every TICK_MINUTES): starts each scheduled run once. If the
+// previous run is still going, that time is skipped rather than queued.
+function autoRun() {
+  const s = readSchedule_();
+  if (!s.enabled) return;
+  const props = PropertiesService.getScriptProperties();
+  const now = Date.now();
+  const slot = slotAt_(s, now, false);
+  if (!slot || slot <= Number(props.getProperty('AUTO_SLOT') || 0)) return;
+  props.setProperty('AUTO_SLOT', String(slot));
+  if (now - slot > HOUR_MS) return; // trigger was off for a while: wait for the next time
+  const at = hhmm_(new Date(slot));
+  const r = tryRun_();
+  if (r.ok) {
+    setMessage_('Tự chạy theo lịch (lượt ' + at + ').');
+  } else if (r.busy) {
+    setMessage_('Bỏ qua lượt tự chạy ' + at + ' vì lần chạy trước chưa xong.');
+  } else {
+    const msg = 'Không tự chạy được lượt ' + at + ': ' + r.error;
+    setMessage_(msg);
+    setProgress_('✗ ' + msg, ACTIONS_URL, 'error', { phase: 'error', message: msg });
+  }
+}
+
+// ---------------------------------------------------------------- dashboard
+
+// Public (no code): what the dashboard shows. Reads properties only — no GitHub
+// call — so viewers polling it cost nothing against the UrlFetch quota.
+function statusPayload_() {
+  const props = PropertiesService.getScriptProperties();
+  const s = readSchedule_();
+  const now = Date.now();
+  return {
+    ok: true,
+    now: now,
+    run: JSON.parse(props.getProperty('RUN_STATE') || '{"phase":"idle"}'),
+    schedule: {
+      enabled: s.enabled,
+      everyHours: s.everyHours,
+      startHour: s.startHour,
+      hours: slotHours_(s),
+      next: nextRunAt_(s, now),
+    },
+    everyHoursOptions: SCHEDULE_HOURS,
+    ready: { github: !!props.getProperty('GITHUB_TOKEN'), code: !!props.getProperty('DASHBOARD_CODE') },
+  };
+}
+
+function handleControl_(req) {
+  const denied = checkCode_(req.code);
+  if (denied) return { ok: false, error: denied.error, message: denied.message };
+  if (req.action === 'run') {
+    const r = tryRun_();
+    if (r.ok) setMessage_(sentMessage_(' từ dashboard'));
+    return {
+      ok: !!r.ok,
+      error: r.ok ? null : r.busy ? 'busy' : 'dispatch',
+      message: r.ok ? 'Đã gửi yêu cầu chạy.'
+        : r.busy ? 'Đang có một lần chạy — đợi xong rồi hãy bấm lại.'
+          : 'Không gửi được yêu cầu chạy: ' + r.error,
+      status: statusPayload_(),
+    };
+  }
+  try {
+    saveSchedule_(req.schedule);
+  } catch (err) {
+    return { ok: false, error: 'invalid', message: err.message };
+  }
+  return { ok: true, message: 'Đã lưu lịch tự chạy.', status: statusPayload_() };
+}
+
+// The checker calls "load" when a run starts. A run not started from the
+// Sheet/dashboard (e.g. "Run workflow" on GitHub) is picked up here, so its
+// status shows too.
+function noteRunStarted_() {
+  if (readWatch_() || !PropertiesService.getScriptProperties().getProperty('GITHUB_TOKEN')) return;
+  const now = Date.now();
+  saveWatch_({ since: now - 10 * 60 * 1000 });
+  setProgress_('⏳ Đang chạy…', ACTIONS_URL, 'busy', { phase: 'running', startedAt: now });
+  ensureWatchTrigger_();
+}
+
 // ---------------------------------------------------------------- web app (bridge)
 
-function doGet() {
+function doGet(e) {
+  if (e && e.parameter && e.parameter.action === 'status') {
+    try {
+      ensureScheduleTrigger_(); // first dashboard visit after an update turns the schedule on
+    } catch (err) {
+      // status is still worth returning
+    }
+    return json_(statusPayload_());
+  }
   return json_({ ok: true, service: 'iptv-monitor' });
 }
 
 function doPost(e) {
   try {
     const req = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+    if (req.action === 'run' || req.action === 'schedule') return json_(handleControl_(req));
     const expected = String(PropertiesService.getScriptProperties().getProperty('BRIDGE_TOKEN') || '').trim();
     const given = String(req.token || '').trim();
     if (!expected) {
@@ -527,6 +831,12 @@ function handleLoad_() {
     data = { header: values[0], rows: values.slice(1) };
   }
   const lastRun = JSON.parse(PropertiesService.getScriptProperties().getProperty('LAST_RUN') || '{}');
+  try {
+    ensureScheduleTrigger_();
+    noteRunStarted_();
+  } catch (err) {
+    // status tracking must never block a run
+  }
   return {
     ok: true,
     config: { countries: v[0], languages: v[1], categories: v[2], level: v[3] },

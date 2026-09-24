@@ -289,3 +289,237 @@ describe('Code.gs — ô "Trạng thái" và khoá nút Chạy ngay', () => {
     assert.equal(progress(gas), 'Sẵn sàng');
   });
 });
+
+describe('Code.gs — lịch tự chạy', () => {
+  // Việt Nam = UTC+7: vn(4, 3) = 04:03 giờ Việt Nam ngày 24/09/2026
+  const vn = (h, m = 0) => Date.UTC(2026, 8, 24, h - 7, m);
+  const at = (gas, ms) => { gas.ctx.Date.now = () => ms; };
+  const posts = (gas) => gas.fetches.filter((f) => f.opts.method === 'post').length;
+  function scheduled() {
+    const { gas } = ready();
+    gas.props.set('GITHUB_TOKEN', 't');
+    return gas;
+  }
+
+  test('setup: trigger autoRun mỗi 10 phút; mặc định mỗi 3 giờ từ 01:00 (giống cron cũ)', () => {
+    const { gas } = ready();
+    const auto = gas.triggers.filter((t) => t.handler === 'autoRun');
+    assert.equal(auto.length, 1);
+    assert.equal(auto[0].minutes, 10);
+    gas.ctx.setup();
+    assert.equal(gas.triggers.filter((t) => t.handler === 'autoRun').length, 1);
+    const { schedule } = gas.get({ action: 'status' });
+    assert.deepEqual(schedule.hours, [1, 4, 7, 10, 13, 16, 19, 22]);
+    assert.equal(schedule.enabled, true);
+  });
+  test('đến giờ → chạy đúng 1 lần cho lượt đó', () => {
+    const gas = scheduled();
+    at(gas, vn(4, 3));
+    gas.ctx.autoRun();
+    assert.equal(posts(gas), 1);
+    assert.equal(gas.sheet('Config').getRange('C7').getValue(), 'Tự chạy theo lịch (lượt 04:00).');
+    assert.equal(gas.get({ action: 'status' }).run.phase, 'queued');
+    at(gas, vn(4, 13));
+    gas.ctx.autoRun();
+    at(gas, vn(5, 50));
+    gas.ctx.autoRun();
+    assert.equal(posts(gas), 1);
+    at(gas, vn(7, 1));
+    gas.setRuns([]);
+    gas.props.delete('RUN_WATCH');
+    gas.ctx.autoRun();
+    assert.equal(posts(gas), 2);
+  });
+  test('trigger tắt lâu (quá 1 giờ sau lượt) → không chạy bù, đợi lượt sau', () => {
+    const gas = scheduled();
+    at(gas, vn(5, 30));
+    gas.ctx.autoRun();
+    assert.equal(posts(gas), 0);
+    assert.equal(gas.get({ action: 'status' }).schedule.next, vn(7));
+  });
+  test('lần trước chưa xong → bỏ qua lượt này, không xếp hàng', () => {
+    const gas = scheduled();
+    gas.setRuns([{ id: 5, status: 'in_progress', created_at: new Date(vn(3, 50)).toISOString(), run_started_at: new Date(vn(3, 50)).toISOString() }]);
+    at(gas, vn(4, 5));
+    gas.ctx.autoRun();
+    assert.equal(posts(gas), 0);
+    assert.equal(gas.sheet('Config').getRange('C7').getValue(), 'Bỏ qua lượt tự chạy 04:00 vì lần chạy trước chưa xong.');
+  });
+  test('GitHub token hết hạn → báo lỗi ở ô Trạng thái và trên dashboard', () => {
+    const gas = scheduled();
+    gas.setFetchCode(401);
+    at(gas, vn(4, 5));
+    gas.ctx.autoRun();
+    const { run } = gas.get({ action: 'status' });
+    assert.equal(run.phase, 'error');
+    assert.match(run.message, /^Không tự chạy được lượt 04:00: GitHub token sai hoặc đã hết hạn/);
+    assert.match(gas.sheet('Config').getRange('B8').getValue(), /^✗ Không tự chạy được lượt 04:00/);
+  });
+  test('tắt tự chạy → không chạy; next = null', () => {
+    const gas = scheduled();
+    gas.props.set('DASHBOARD_CODE', 'ABCDEFGH');
+    at(gas, vn(3, 55));
+    const res = gas.post({ action: 'schedule', code: 'ABCD-EFGH', schedule: { enabled: false, everyHours: 3, startHour: 1 } });
+    assert.equal(res.ok, true);
+    assert.equal(res.status.schedule.next, null);
+    at(gas, vn(4, 5));
+    gas.ctx.autoRun();
+    assert.equal(posts(gas), 0);
+  });
+  test('đổi lịch: mỗi 6 giờ từ 07:00 → 01, 07, 13, 19; không chạy bù ngay lúc đổi', () => {
+    const gas = scheduled();
+    gas.props.set('DASHBOARD_CODE', 'ABCDEFGH');
+    at(gas, vn(7, 20));
+    const res = gas.post({ action: 'schedule', code: 'abcdefgh', schedule: { enabled: true, everyHours: 6, startHour: 7 } });
+    assert.equal(res.ok, true);
+    assert.deepEqual(res.status.schedule.hours, [1, 7, 13, 19]);
+    assert.equal(res.status.schedule.next, vn(13));
+    assert.match(gas.sheet('Config').getRange('C7').getValue(), /^Lịch tự chạy: mỗi 6 giờ \(01:00, 07:00, 13:00, 19:00\)/);
+    gas.ctx.autoRun();
+    assert.equal(posts(gas), 0);
+    at(gas, vn(13, 4));
+    gas.ctx.autoRun();
+    assert.equal(posts(gas), 1);
+  });
+  test('mỗi 24 giờ từ 08:00 → một lượt/ngày; lượt kế tiếp có thể là ngày mai', () => {
+    const gas = scheduled();
+    gas.props.set('DASHBOARD_CODE', 'ABCDEFGH');
+    at(gas, vn(9));
+    const res = gas.post({ action: 'schedule', code: 'ABCDEFGH', schedule: { enabled: true, everyHours: 24, startHour: 8 } });
+    assert.deepEqual(res.status.schedule.hours, [8]);
+    assert.equal(res.status.schedule.next, vn(8) + 24 * 3600 * 1000);
+  });
+  test('lịch không hợp lệ → từ chối, giữ lịch cũ', () => {
+    const gas = scheduled();
+    gas.props.set('DASHBOARD_CODE', 'ABCDEFGH');
+    const bad = gas.post({ action: 'schedule', code: 'ABCDEFGH', schedule: { enabled: true, everyHours: 5, startHour: 1 } });
+    assert.deepEqual([bad.ok, bad.error], [false, 'invalid']);
+    const bad2 = gas.post({ action: 'schedule', code: 'ABCDEFGH', schedule: { enabled: true, everyHours: 3, startHour: 24 } });
+    assert.equal(bad2.error, 'invalid');
+    assert.equal(gas.get({ action: 'status' }).schedule.everyHours, 3);
+  });
+});
+
+describe('Code.gs — dashboard (trạng thái, Chạy ngay, mã thao tác)', () => {
+  const posts = (gas) => gas.fetches.filter((f) => f.opts.method === 'post').length;
+  function withCode() {
+    const { gas } = ready();
+    gas.props.set('GITHUB_TOKEN', 't');
+    return { gas, code: gas.props.get('DASHBOARD_CODE') };
+  }
+
+  test('setup tạo mã thao tác 8 ký tự dễ đọc (không có I, O, 0, 1)', () => {
+    const { code } = withCode();
+    assert.match(code, /^[A-HJ-NP-Z2-9]{8}$/);
+  });
+  test('trạng thái: ai cũng xem được, không gọi GitHub', () => {
+    const { gas } = withCode();
+    const s = gas.get({ action: 'status' });
+    assert.equal(s.ok, true);
+    assert.equal(s.run.phase, 'idle');
+    assert.deepEqual(s.ready, { github: true, code: true });
+    assert.deepEqual(s.everyHoursOptions, [1, 2, 3, 4, 6, 8, 12, 24]);
+    assert.equal(gas.fetches.length, 0);
+    assert.ok(!JSON.stringify(s).includes(gas.props.get('DASHBOARD_CODE')));
+    assert.deepEqual(gas.get({}), { ok: true, service: 'iptv-monitor' });
+  });
+  test('Chạy ngay: sai mã → từ chối; đúng mã (có gạch, chữ thường) → gửi, trạng thái "queued"', () => {
+    const { gas, code } = withCode();
+    const wrong = gas.post({ action: 'run', code: 'WRONG123' });
+    assert.deepEqual([wrong.ok, wrong.error, wrong.message], [false, 'bad_code', 'Mã thao tác không đúng.']);
+    assert.equal(posts(gas), 0);
+    const res = gas.post({ action: 'run', code: `${code.slice(0, 4)}-${code.slice(4)}`.toLowerCase() });
+    assert.equal(res.ok, true);
+    assert.equal(res.status.run.phase, 'queued');
+    assert.equal(posts(gas), 1);
+    assert.match(gas.sheet('Config').getRange('C7').getValue(), /^Đã gửi yêu cầu chạy từ dashboard lúc/);
+  });
+  test('Chạy ngay khi đang có lần chạy → từ chối, không gửi thêm', () => {
+    const { gas, code } = withCode();
+    gas.post({ action: 'run', code });
+    const again = gas.post({ action: 'run', code });
+    assert.deepEqual([again.ok, again.error], [false, 'busy']);
+    assert.equal(posts(gas), 1);
+  });
+  test('Sheet đang ghi kết quả (giữ khoá) → coi như đang chạy', () => {
+    const { gas, code } = withCode();
+    gas.ctx.__lockBusy = true;
+    assert.equal(gas.post({ action: 'run', code }).error, 'busy');
+    assert.equal(posts(gas), 0);
+  });
+  test('chưa có GitHub token → báo rõ', () => {
+    const { gas, code } = withCode();
+    gas.props.delete('GITHUB_TOKEN');
+    assert.equal(gas.get({ action: 'status' }).ready.github, false);
+    const res = gas.post({ action: 'run', code });
+    assert.equal(res.error, 'dispatch');
+    assert.match(res.message, /chưa nhập GitHub token/);
+  });
+  test('đoán mã: sai 10 lần → khoá 15 phút, kể cả mã đúng; hết 15 phút → dùng lại được', () => {
+    const { gas, code } = withCode();
+    const t0 = Date.now();
+    gas.ctx.Date.now = () => t0;
+    for (let i = 0; i < 10; i++) assert.equal(gas.post({ action: 'run', code: `BAD${i}` }).error, 'bad_code');
+    const locked = gas.post({ action: 'run', code });
+    assert.equal(locked.error, 'locked');
+    assert.match(locked.message, /thử lại sau 15 phút/);
+    assert.equal(posts(gas), 0);
+    gas.ctx.Date.now = () => t0 + 16 * 60 * 1000;
+    assert.equal(gas.post({ action: 'run', code }).ok, true);
+  });
+  test('Sheet chưa có mã (Apps Script cũ nâng cấp) → báo cách tạo mã', () => {
+    const { gas } = withCode();
+    gas.props.delete('DASHBOARD_CODE');
+    const res = gas.post({ action: 'run', code: 'X' });
+    assert.equal(res.error, 'no_code');
+    assert.match(res.message, /Mã thao tác dashboard/);
+  });
+  test('lần chạy xong → trạng thái dashboard có phase, giờ bắt đầu / xong, link', () => {
+    const { gas, code } = withCode();
+    gas.post({ action: 'run', code });
+    const started = new Date(Date.now() - 120000).toISOString();
+    gas.setRuns([{ id: 9, status: 'completed', conclusion: 'success', created_at: new Date().toISOString(), run_started_at: started, updated_at: new Date().toISOString(), html_url: 'https://github.com/x/runs/9' }]);
+    gas.ctx.watchRun();
+    const { run } = gas.get({ action: 'status' });
+    assert.equal(run.phase, 'success');
+    assert.equal(run.startedAt, Date.parse(started));
+    assert.ok(run.finishedAt >= run.startedAt);
+    assert.equal(run.url, 'https://github.com/x/runs/9');
+  });
+  test('lần chạy bấm trên GitHub (không qua Sheet) → load bật theo dõi để dashboard thấy', () => {
+    const { gas, token } = ready();
+    gas.props.set('GITHUB_TOKEN', 't');
+    gas.post({ token, action: 'load' });
+    assert.equal(gas.get({ action: 'status' }).run.phase, 'running');
+    assert.equal(gas.triggers.filter((t) => t.handler === 'watchRun').length, 1);
+    gas.post({ token, action: 'load' }); // already watching: nothing new
+    assert.equal(gas.triggers.filter((t) => t.handler === 'watchRun').length, 1);
+  });
+  test('Apps Script cũ chưa có trigger autoRun → mở dashboard (status) tự bật lịch', () => {
+    const { gas } = withCode();
+    gas.triggers.splice(0, gas.triggers.length);
+    gas.get({ action: 'status' });
+    assert.equal(gas.triggers.filter((t) => t.handler === 'autoRun').length, 1);
+  });
+  test('trigger autoRun bị tạo trùng → chỉ giữ 1', () => {
+    const { gas } = withCode();
+    gas.ctx.ScriptApp.newTrigger('autoRun').timeBased().everyMinutes(10).create();
+    gas.get({ action: 'status' });
+    assert.equal(gas.triggers.filter((t) => t.handler === 'autoRun').length, 1);
+  });
+  test('menu Mã thao tác: hiện mã dạng ABCD-EFGH; Đổi mã → mã cũ hết hiệu lực', () => {
+    const { gas, code } = withCode();
+    gas.withUi();
+    gas.ctx.showDashboardCode();
+    assert.equal(gas.dialogs.at(-1).title, 'Mã thao tác dashboard');
+    assert.ok(gas.dialogs.at(-1).html.includes(`value="${code.slice(0, 4)}-${code.slice(4)}"`));
+    gas.ctx.resetDashboardCode(); // answered "OK", not "YES" → unchanged
+    assert.equal(gas.props.get('DASHBOARD_CODE'), code);
+    gas.ctx.__uiAnswer = 'YES';
+    gas.ctx.resetDashboardCode();
+    const fresh = gas.props.get('DASHBOARD_CODE');
+    assert.notEqual(fresh, code);
+    assert.equal(gas.post({ action: 'run', code }).error, 'bad_code');
+    assert.equal(gas.post({ action: 'run', code: fresh }).ok, true);
+  });
+});

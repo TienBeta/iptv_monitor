@@ -408,6 +408,7 @@
       renderHeader(data);
       fillSelects(data);
       render();
+      setupControl(data);
     } catch (err) {
       if (!state.data) {
         showError(err.status === 404);
@@ -424,6 +425,277 @@
     }
   }
 
+  // ---------- Run controls: "Chạy ngay", run status, schedule ----------
+  // They talk to the Sheet's Apps Script web app (URL comes with results.json).
+  // Status is public; running and changing the schedule need the operator code.
+
+  const CONTROL_URL_RE = /^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/;
+  const CODE_KEY = 'iptv-monitor:code';
+  const BUSY_PHASES = ['queued', 'running'];
+  const POLL_BUSY_MS = 10 * 1000;
+  const POLL_IDLE_MS = 60 * 1000;
+  const ctl = { url: null, status: null, timer: null, sending: false, memCode: '', codeResolve: null, waiting: false, skew: 0 };
+  const dayFmt = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Ho_Chi_Minh', day: '2-digit', month: '2-digit' });
+  const clockFmt = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Ho_Chi_Minh', hour: '2-digit', minute: '2-digit', hour12: false });
+  const pad2 = (n) => String(n).padStart(2, '0');
+  const serverNow = () => Date.now() + ctl.skew;
+
+  // "14:05" today, "14:05 25/09" on another day (giờ Việt Nam)
+  function when(ms) {
+    const day = dayFmt.format(new Date(ms));
+    return day === dayFmt.format(new Date(serverNow())) ? clockFmt.format(new Date(ms)) : `${clockFmt.format(new Date(ms))} ${day}`;
+  }
+  function minutesText(ms) {
+    const min = Math.round(ms / 60000);
+    return min < 1 ? 'dưới 1 phút' : `${min} phút`;
+  }
+
+  const RUN_VIEW = {
+    idle: { tone: 'neutral', title: 'Sẵn sàng', detail: () => '' },
+    queued: { busy: true, title: 'Đang chờ chạy', detail: (r) => (r.since ? `gửi yêu cầu lúc ${when(r.since)}` : '') },
+    running: { busy: true, title: 'Đang chạy kiểm tra', detail: (r) => (r.startedAt ? `bắt đầu ${when(r.startedAt)} · đã chạy ${minutesText(serverNow() - r.startedAt)}` : '') },
+    success: { tone: 'ok', title: 'Đã chạy xong', detail: (r) => (r.finishedAt ? `lúc ${when(r.finishedAt)}${r.startedAt ? ` · chạy ${minutesText(r.finishedAt - r.startedAt)}` : ''}` : '') },
+    failure: { tone: 'err', title: 'Lần chạy bị lỗi', detail: (r) => (r.finishedAt ? `lúc ${when(r.finishedAt)}` : ''), link: 'Xem nguyên nhân' },
+    cancelled: { tone: 'neutral', title: 'Lần chạy bị huỷ', detail: (r) => (r.finishedAt ? `lúc ${when(r.finishedAt)}` : '') },
+    error: { tone: 'err', title: 'Có lỗi', detail: (r) => r.message || '' },
+  };
+
+  function getCode() {
+    if (ctl.memCode) return ctl.memCode;
+    try { return localStorage.getItem(CODE_KEY) || ''; } catch { return ''; }
+  }
+  function keepCode(code, remember) {
+    ctl.memCode = code;
+    try { if (remember) localStorage.setItem(CODE_KEY, code); else localStorage.removeItem(CODE_KEY); } catch { /* private mode */ }
+  }
+  function forgetCode() { keepCode('', false); }
+
+  function setupControl(data) {
+    const url = CONTROL_URL_RE.test(data.controlUrl || '') ? data.controlUrl : null;
+    if (url === ctl.url) return;
+    ctl.url = url;
+    $('runbar').hidden = !url;
+    if (url) fetchStatus();
+  }
+
+  async function fetchStatus() {
+    clearTimeout(ctl.timer);
+    if (!ctl.url) return;
+    try {
+      const res = await fetch(`${ctl.url}?action=status&t=${Date.now()}`, { cache: 'no-store' });
+      const s = await res.json();
+      if (!s.ok || !s.run || !s.schedule) throw Object.assign(new Error('old'), { old: true });
+      applyStatus(s);
+    } catch (err) {
+      renderRunProblem(err.old
+        ? 'Apps Script trong Sheet chưa được cập nhật bản mới nên chưa dùng được Chạy ngay ở đây.'
+        : 'Không lấy được trạng thái lần chạy — sẽ thử lại sau.');
+    }
+    pollLater();
+  }
+
+  function pollLater() {
+    clearTimeout(ctl.timer);
+    const busy = ctl.status && BUSY_PHASES.includes(ctl.status.run.phase);
+    ctl.timer = setTimeout(() => (document.hidden ? pollLater() : fetchStatus()), busy ? POLL_BUSY_MS : POLL_IDLE_MS);
+  }
+
+  function applyStatus(s) {
+    ctl.status = s;
+    if (s.now) ctl.skew = s.now - Date.now();
+    renderRunbar();
+    if (resultsBehind()) awaitResults();
+  }
+
+  // The run finished but the published results are older than it: GitHub Pages
+  // takes about a minute to serve the new file.
+  function resultsBehind() {
+    const r = ctl.status && ctl.status.run;
+    return !!(r && r.phase === 'success' && r.startedAt && state.data && state.data.generatedAt < r.startedAt);
+  }
+  async function awaitResults() {
+    if (ctl.waiting) return;
+    ctl.waiting = true;
+    for (let i = 0; i < 20 && resultsBehind(); i++) {
+      await new Promise((resolve) => { setTimeout(resolve, 15000); });
+      await load();
+      if (!resultsBehind()) toast('Đã có kết quả mới');
+    }
+    ctl.waiting = false;
+  }
+
+  function renderRunProblem(text) {
+    $('run-icon').className = 'run-icon dot tone-neutral';
+    $('run-title').textContent = 'Chạy ngay chưa sẵn sàng';
+    $('run-detail').textContent = text;
+    $('schedule-text').textContent = '';
+    $('run-now').disabled = true;
+    $('schedule-open').disabled = true;
+  }
+
+  function renderRunbar() {
+    const s = ctl.status;
+    if (!s) return;
+    const run = s.run;
+    const view = RUN_VIEW[run.phase] || RUN_VIEW.idle;
+    const busy = BUSY_PHASES.includes(run.phase);
+    $('run-icon').className = view.busy ? 'run-icon is-busy' : `run-icon dot tone-${view.tone}`;
+    $('run-title').textContent = view.title;
+    const detail = $('run-detail');
+    detail.replaceChildren();
+    const parts = [view.detail(run)].filter(Boolean);
+    if (!s.ready.github) parts.push('Sheet chưa nhập GitHub token nên chưa chạy được');
+    else if (!s.ready.code) parts.push('Sheet chưa tạo mã thao tác');
+    detail.append(parts.join(' · '));
+    if (/^https:\/\/github\.com\//.test(run.url || '') && run.phase !== 'idle') {
+      const a = el('a', null, view.link || 'Xem trên GitHub');
+      a.href = run.url;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      detail.append(parts.length ? ' · ' : '', a);
+    }
+    const sch = s.schedule;
+    $('schedule-text').textContent = sch.enabled
+      ? `Tự chạy mỗi ${sch.everyHours} giờ${sch.next ? ` · lần tới ${when(sch.next)}` : ''}`
+      : 'Tự chạy: đang tắt';
+    const btn = $('run-now');
+    btn.disabled = busy || ctl.sending || !s.ready.github || !s.ready.code;
+    btn.classList.toggle('is-sending', ctl.sending);
+    $('run-now-label').textContent = busy ? 'Đang chạy…' : ctl.sending ? 'Đang gửi…' : 'Chạy ngay';
+    $('schedule-open').disabled = !s.ready.code;
+  }
+
+  async function post(body) {
+    try {
+      const res = await fetch(ctl.url, { method: 'POST', body: JSON.stringify(body) }); // text/plain: no CORS preflight
+      return await res.json();
+    } catch {
+      return { ok: false, error: 'network', message: 'Không kết nối được tới Google Sheet, thử lại sau.' };
+    }
+  }
+
+  // Sends an action that needs the operator code; asks for it when missing or wrong.
+  async function control(body) {
+    let code = getCode();
+    let problem = '';
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (!code) {
+        code = await askCode(problem);
+        if (!code) return null;
+      }
+      ctl.sending = true;
+      renderRunbar();
+      const res = await post({ ...body, code });
+      ctl.sending = false;
+      if (res.error === 'bad_code') {
+        forgetCode();
+        code = '';
+        problem = res.message;
+        renderRunbar();
+        continue;
+      }
+      if (res.status) applyStatus(res.status);
+      else renderRunbar();
+      pollLater();
+      return res;
+    }
+    return null;
+  }
+
+  function showFormError(id, text) {
+    $(id).textContent = text || '';
+    $(id).hidden = !text;
+  }
+
+  function askCode(problem) {
+    $('code-input').value = '';
+    showFormError('code-error', problem);
+    $('code-dialog').showModal();
+    return new Promise((resolve) => { ctl.codeResolve = resolve; });
+  }
+  function finishCode(code) {
+    const resolve = ctl.codeResolve;
+    ctl.codeResolve = null;
+    if ($('code-dialog').open) $('code-dialog').close();
+    if (resolve) resolve(code);
+  }
+
+  async function runNow() {
+    const res = await control({ action: 'run' });
+    if (res) toast(res.message || (res.ok ? 'Đã gửi yêu cầu chạy.' : 'Không gửi được yêu cầu chạy.'));
+  }
+
+  function slotHours(every, start) {
+    const hours = [];
+    for (let h = start % every; h < 24; h += every) hours.push(h);
+    return hours;
+  }
+
+  function openSchedule() {
+    const s = ctl.status;
+    if (!s) return;
+    const every = $('sch-every');
+    every.replaceChildren(...(s.everyHoursOptions || [1, 2, 3, 4, 6, 8, 12, 24])
+      .map((n) => new Option(n === 24 ? '24 giờ (mỗi ngày 1 lần)' : `${n} giờ`, String(n))));
+    const start = $('sch-start');
+    start.replaceChildren(...Array.from({ length: 24 }, (_, h) => new Option(`${pad2(h)}:00`, String(h))));
+    $('sch-enabled').checked = s.schedule.enabled;
+    every.value = String(s.schedule.everyHours);
+    start.value = String(s.schedule.startHour);
+    showFormError('sch-error', '');
+    updateSchedulePreview();
+    $('schedule-dialog').showModal();
+  }
+
+  function updateSchedulePreview() {
+    const enabled = $('sch-enabled').checked;
+    const every = Number($('sch-every').value);
+    $('sch-every').disabled = !enabled;
+    $('sch-start').disabled = !enabled || every === 1;
+    $('sch-preview').textContent = enabled
+      ? `Các giờ chạy mỗi ngày: ${slotHours(every, Number($('sch-start').value)).map((h) => `${pad2(h)}:00`).join(', ')}`
+      : 'Tự chạy đang tắt — chỉ chạy khi bấm Chạy ngay hoặc khi sửa cấu hình trong Sheet.';
+  }
+
+  async function saveSchedule(e) {
+    e.preventDefault();
+    const save = $('sch-save');
+    save.disabled = true;
+    save.textContent = 'Đang lưu…';
+    showFormError('sch-error', '');
+    const res = await control({
+      action: 'schedule',
+      schedule: { enabled: $('sch-enabled').checked, everyHours: Number($('sch-every').value), startHour: Number($('sch-start').value) },
+    });
+    save.disabled = false;
+    save.textContent = 'Lưu lịch';
+    if (!res) return;
+    if (res.ok) {
+      $('schedule-dialog').close();
+      toast('Đã lưu lịch tự chạy');
+    } else {
+      showFormError('sch-error', res.message || 'Không lưu được lịch, thử lại sau.');
+    }
+  }
+
+  $('run-now').addEventListener('click', runNow);
+  $('schedule-open').addEventListener('click', openSchedule);
+  $('schedule-form').addEventListener('submit', saveSchedule);
+  ['sch-enabled', 'sch-every', 'sch-start'].forEach((id) => $(id).addEventListener('change', updateSchedulePreview));
+  $('code-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const code = $('code-input').value.trim();
+    if (!code) {
+      showFormError('code-error', 'Nhập mã thao tác.');
+      return;
+    }
+    keepCode(code, $('code-remember').checked);
+    finishCode(code);
+  });
+  $('code-dialog').addEventListener('close', () => finishCode(null));
+  document.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => b.closest('dialog').close()));
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && ctl.url) fetchStatus(); });
+
   $('q').addEventListener('input', (e) => { state.q = e.target.value; state.shown = PAGE; render(); });
   $('status').addEventListener('change', (e) => { state.status = e.target.value; state.shown = PAGE; render(); });
   $('country').addEventListener('change', (e) => { state.country = e.target.value; state.shown = PAGE; render(); });
@@ -431,7 +703,7 @@
   $('clear').addEventListener('click', clearFilters);
   $('empty-clear').addEventListener('click', clearFilters);
   $('retry').addEventListener('click', load);
-  $('refresh').addEventListener('click', load);
+  $('refresh').addEventListener('click', () => { load(); fetchStatus(); });
   document.querySelectorAll('th button[data-sort]').forEach((b) => b.addEventListener('click', () => {
     const key = b.dataset.sort;
     state.dir = state.sort === key ? -state.dir : 1;
