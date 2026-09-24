@@ -170,8 +170,11 @@ export function loadAppsScript(file = new URL('../../apps-script/Code.gs', impor
       getUi: () => {
         if (!sandbox.__ui) throw new Error('no UI in tests');
         return {
-          showModalDialog: (out, title) => dialogs.push({ title, html: out.html }),
-          alert: (m) => { dialogs.push({ alert: m }); return sandbox.__uiAnswer || 'OK'; },
+          alert: (a, b) => { dialogs.push(b === undefined ? { alert: a } : { title: a, alert: b }); return sandbox.__uiAnswer || 'OK'; },
+          showModalDialog: (out, title) => {
+            if (sandbox.__htmlDialogFails) throw new Error('Không mở được hộp thoại');
+            dialogs.push({ title, html: out.html });
+          },
           prompt: (title) => {
             dialogs.push({ prompt: title });
             const answer = sandbox.__prompt || { button: 'CANCEL', text: '' };

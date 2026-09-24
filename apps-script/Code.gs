@@ -118,10 +118,26 @@ function showBridgeToken() {
     'try{navigator.clipboard.writeText(e.value)}catch(x){}document.execCommand("copy");' +
     'document.getElementById(id+"s").textContent="Đã copy";}</script></div>',
   ).setWidth(560).setHeight(url ? 330 : 250);
-  try {
-    SpreadsheetApp.getUi().showModalDialog(html, 'Bridge token');
-  } catch (err) {
+  const ui = sheetUi_();
+  if (!ui) {
     Logger.log(token); // run from the editor: no UI
+    return;
+  }
+  try {
+    ui.showModalDialog(html, 'Bridge token');
+  } catch (err) {
+    // HTML dialogs can fail (e.g. several Google accounts signed in): a plain alert always opens.
+    ui.alert('Bridge token', 'Token (secret SHEET_BRIDGE_TOKEN):\n' + token + '\n\nMã kiểm tra: ' + tokenCode_(token) +
+      (url ? '\n\nWeb app URL (secret SHEET_BRIDGE_URL):\n' + url : ''), ui.ButtonSet.OK);
+  }
+}
+
+// The Sheet's UI, or null when run from the Apps Script editor / a trigger.
+function sheetUi_() {
+  try {
+    return SpreadsheetApp.getUi();
+  } catch (err) {
+    return null;
   }
 }
 
@@ -178,24 +194,20 @@ function codeProblem_(typed) {
   return null;
 }
 
+// A plain alert: always opens (unlike HTML dialogs), and an 8–32 character code is easy to copy by hand.
 function showCodeDialog_(code) {
-  const html = HtmlService.createHtmlOutput(
-    '<div style="font:14px Arial,sans-serif;line-height:1.5">' +
-    '<p>Nhập mã này trên dashboard khi bấm <b>Chạy ngay</b> hoặc đổi <b>Lịch chạy</b>. ' +
-    'Xem trạng thái thì không cần mã.</p>' +
-    copyBox_('c', code) +
-    '<p>Dashboard: <a href="' + DASHBOARD_URL + '" target="_blank">' + DASHBOARD_URL + '</a></p>' +
-    '<p style="color:#5f6368">Chỉ gửi mã cho người được phép chạy kiểm tra. Lộ mã thì dùng menu ' +
-    '<b>Đặt / đổi mã thao tác dashboard</b>.</p>' +
-    '<script>function cp(id){var e=document.getElementById(id);e.select();' +
-    'try{navigator.clipboard.writeText(e.value)}catch(x){}document.execCommand("copy");' +
-    'document.getElementById(id+"s").textContent="Đã copy";}</script></div>',
-  ).setWidth(480).setHeight(280);
-  try {
-    SpreadsheetApp.getUi().showModalDialog(html, 'Mã thao tác dashboard');
-  } catch (err) {
+  const ui = sheetUi_();
+  if (!ui) {
     Logger.log(code); // run from the editor: no UI
+    return;
   }
+  ui.alert('Mã thao tác dashboard',
+    'Mã: ' + code + '\n\n' +
+    'Dùng trên dashboard khi bấm "Chạy ngay" hoặc "Lịch chạy" (dashboard hỏi mã ở lần bấm đầu). ' +
+    'Chỉ xem kết quả thì không cần mã.\n\n' +
+    'Dashboard: ' + DASHBOARD_URL + '\n\n' +
+    'Chỉ gửi mã cho người được phép chạy kiểm tra. Đổi mã: IPTV Monitor → Quản trị → Đặt / đổi mã thao tác dashboard.',
+    ui.ButtonSet.OK);
 }
 
 function saveNewCode_() {

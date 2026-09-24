@@ -524,12 +524,32 @@ describe('Code.gs — dashboard (trạng thái, Chạy ngay, mã thao tác)', ()
     gas.get({ action: 'status' });
     assert.equal(gas.triggers.filter((t) => t.handler === 'autoRun').length, 1);
   });
-  test('menu Mã thao tác: hiện mã dạng ABCD-EFGH', () => {
+  test('menu Xem mã thao tác: hộp thông báo có mã dạng ABCD-EFGH + link dashboard', () => {
     const { gas, code } = withCode();
     gas.withUi();
     gas.ctx.showDashboardCode();
     assert.equal(gas.dialogs.at(-1).title, 'Mã thao tác dashboard');
-    assert.ok(gas.dialogs.at(-1).html.includes(`value="${code}"`));
+    assert.ok(gas.dialogs.at(-1).alert.startsWith(`Mã: ${code}\n`));
+    assert.ok(gas.dialogs.at(-1).alert.includes('https://tienbeta.github.io/iptv_monitor/'));
+  });
+  test('Sheet chưa có mã (chưa chạy Cài đặt ban đầu) → Xem mã tạo mã mới và hiện ra', () => {
+    const { gas } = withCode();
+    gas.props.delete('DASHBOARD_CODE');
+    gas.withUi();
+    gas.ctx.showDashboardCode();
+    const code = gas.props.get('DASHBOARD_CODE');
+    assert.match(code, /^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/);
+    assert.ok(gas.dialogs.at(-1).alert.startsWith(`Mã: ${code}`));
+  });
+  test('Xem bridge token: hộp HTML không mở được → vẫn hiện token bằng hộp thông báo', () => {
+    const { gas, code } = withCode();
+    const token = gas.props.get('BRIDGE_TOKEN');
+    gas.withUi();
+    gas.ctx.__htmlDialogFails = true;
+    gas.ctx.showBridgeToken();
+    assert.equal(gas.dialogs.at(-1).title, 'Bridge token');
+    assert.ok(gas.dialogs.at(-1).alert.includes(token));
+    assert.ok(code);
   });
   describe('tự đặt mã (menu Đặt / đổi mã thao tác)', () => {
     const setCode = (gas, answer) => {
@@ -541,7 +561,7 @@ describe('Code.gs — dashboard (trạng thái, Chạy ngay, mã thao tác)', ()
       const { gas, code } = withCode();
       setCode(gas, { button: 'OK', text: '  Vulcan 2026 ' });
       assert.equal(gas.props.get('DASHBOARD_CODE'), 'VULCAN 2026');
-      assert.ok(gas.dialogs.at(-1).html.includes('value="VULCAN 2026"'));
+      assert.ok(gas.dialogs.at(-1).alert.startsWith('Mã: VULCAN 2026\n'));
       assert.equal(gas.post({ action: 'run', code }).error, 'bad_code');
       assert.equal(gas.post({ action: 'run', code: 'vulcan-2026' }).ok, true);
     });
