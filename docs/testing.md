@@ -17,7 +17,7 @@ Workflow [`Tests`](../.github/workflows/test.yml) chạy lại mỗi khi có cod
 | Toàn bộ luồng | API iptv-org giả → checker → web app (trả 302 như Apps Script thật) → Sheet giả → `results.json` | `checker/test/monitor.test.js` |
 | Quy mô | 1.000 link trên 21 host, timeout thu nhỏ 10 lần | `checker/test/scale.test.js` |
 | Dashboard | Chạy bằng Chromium: máy tính (1280 px), tablet (900 px), điện thoại (390 / 320 px); bấm thẻ, lọc, tìm, sắp xếp, copy, Hiện thêm, Xoá bộ lọc, link có bộ lọc (#country=…); màn hình đang tải / rỗng / lỗi 404 / lỗi mạng + Thử lại; không tràn ngang, không lỗi JS | thủ công (xem Phase 4) |
-| Dashboard ↔ Apps Script | Chromium gọi **chính `Code.gs`** (Sheet giả) qua web app giả: nhập sai / đúng mã, Chạy ngay → đang chờ → đang chạy → xong → tự tải kết quả mới, đang chạy thì khoá nút, Lịch chạy (đổi, tắt, lịch không hợp lệ), nhớ mã sau khi tải lại, Apps Script cũ / không kết nối được | thủ công |
+| Dashboard ↔ Apps Script | Chromium gọi **chính `Code.gs`** (Sheet giả) qua web app giả: nhập sai / đúng mã, Chạy ngay → đang chờ → đang chạy → xong → tự tải kết quả mới, đang chạy thì khoá nút, Cài đặt (đổi mức kiểm tra → ghi ô B6 + tự chạy lại; đổi lịch, tắt, lịch không hợp lệ), nhớ mã sau khi tải lại, Apps Script cũ / không kết nối được | thủ công |
 | Lịch tự chạy, mã thao tác | Unit test trên `Code.gs`: đúng giờ chạy 1 lần/lượt, không chạy bù, bỏ lượt khi đang chạy, token hết hạn → báo lỗi, đổi lịch, khoá sau 10 lần sai mã | `checker/test/apps-script.test.js` |
 
 ## 15 test case đã yêu cầu
@@ -79,4 +79,4 @@ kiểm tra ngay sau khi làm xong [docs/setup.md](setup.md):
 | Bố cục Config mới | Sheet cũ → Quản trị → Cài đặt ban đầu | Dòng 7 *Lịch tự chạy*, 8 *Trạng thái*, 9 *Thông báo*; hết ô tick B7; B3–B6 giữ nguyên |
 | Dashboard: thay đổi / lý do / hoạt động lần cuối | Mở dashboard sau lần chạy thứ 2 | Dòng *So với lần chạy trước* (bấm để lọc), mũi tên ▲▼ trên thẻ, lọc *Lý do*, cột *Hoạt động lần cuối* |
 | Lịch tự chạy | Xem tab Actions sau ~6 giờ | Có run *workflow_dispatch* trong ~10 phút sau các giờ đã hẹn (mặc định 01, 04, 07, 10, 13, 16, 19, 22 giờ VN) |
-| Dashboard: Chạy ngay / Lịch chạy | Bấm **Chạy ngay** → nhập mã; mở **Lịch chạy** → đổi → Lưu | Thanh trên cùng: *Đang chờ chạy* → *Đang chạy kiểm tra* → *Đã chạy xong*, rồi bảng tự tải kết quả mới; lịch mới hiện “lần tới …” |
+| Dashboard: Chạy ngay / Cài đặt | Bấm **Chạy ngay** → nhập mã; mở **Cài đặt** → đổi mức kiểm tra / lịch → Lưu | Thanh trên cùng: *Đang chờ chạy* → *Đang chạy kiểm tra* → *Đã chạy xong*, rồi bảng tự tải kết quả mới; lịch mới hiện “lần tới …” |

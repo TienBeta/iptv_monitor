@@ -741,6 +741,16 @@
     if (res) toast(res.message || (res.ok ? 'Đã gửi yêu cầu chạy.' : 'Không gửi được yêu cầu chạy.'));
   }
 
+  // Short, plain explanation of each level (keys: the part before " - ").
+  const LEVEL_HINTS = {
+    1: 'Chỉ xem link có trả lời. Nhanh nhất, nhưng dễ báo "hoạt động" dù không xem được.',
+    2: 'Kiểm tra thêm danh sách phát (m3u8) có hợp lệ.',
+    3: 'Tải thử một đoạn video. Nên dùng: cân bằng giữa tốc độ và độ chắc chắn.',
+    '4a': 'Đọc được luồng hình hoặc tiếng. Chắc hơn, chạy lâu hơn.',
+    '4b': 'Giải mã được khung hình. Chắc chắn nhất, chạy lâu nhất.',
+  };
+  const levelKey = (label) => String(label || '').split(' - ')[0];
+
   function slotHours(every, start) {
     const hours = [];
     for (let h = start % every; h < 24; h += every) hours.push(h);
@@ -758,9 +768,21 @@
     $('sch-enabled').checked = s.schedule.enabled;
     every.value = String(s.schedule.everyHours);
     start.value = String(s.schedule.startHour);
+    // Older Apps Script (no level in the status): only the schedule can change here.
+    const levels = s.levelOptions || [];
+    $('level-section').hidden = !levels.length;
+    $('set-level').replaceChildren(...levels.map((l) => new Option(l, l)));
+    if (levels.length) $('set-level').value = s.config?.level || levels[2];
     showFormError('sch-error', '');
     updateSchedulePreview();
+    updateLevelHint();
     $('schedule-dialog').showModal();
+  }
+
+  function updateLevelHint() {
+    const level = $('set-level').value;
+    $('level-hint').textContent = LEVEL_HINTS[levelKey(level)] || '';
+    $('level-note').hidden = !ctl.status?.config || level === ctl.status.config.level;
   }
 
   function updateSchedulePreview() {
@@ -779,18 +801,20 @@
     save.disabled = true;
     save.textContent = 'Đang lưu…';
     showFormError('sch-error', '');
+    const withLevel = !$('level-section').hidden;
     const res = await control({
-      action: 'schedule',
+      action: withLevel ? 'settings' : 'schedule',
+      ...(withLevel ? { level: $('set-level').value } : {}),
       schedule: { enabled: $('sch-enabled').checked, everyHours: Number($('sch-every').value), startHour: Number($('sch-start').value) },
     });
     save.disabled = false;
-    save.textContent = 'Lưu lịch';
+    save.textContent = 'Lưu';
     if (!res) return;
     if (res.ok) {
       $('schedule-dialog').close();
-      toast('Đã lưu lịch tự chạy');
+      toast(res.message || 'Đã lưu');
     } else {
-      showFormError('sch-error', res.message || 'Không lưu được lịch, thử lại sau.');
+      showFormError('sch-error', res.message || 'Không lưu được, thử lại sau.');
     }
   }
 
@@ -798,6 +822,7 @@
   $('schedule-open').addEventListener('click', openSchedule);
   $('schedule-form').addEventListener('submit', saveSchedule);
   ['sch-enabled', 'sch-every', 'sch-start'].forEach((id) => $(id).addEventListener('change', updateSchedulePreview));
+  $('set-level').addEventListener('change', updateLevelHint);
   $('code-form').addEventListener('submit', (e) => {
     e.preventDefault();
     const code = $('code-input').value.trim();

@@ -6,7 +6,7 @@ Bạn sẽ có:
 
 - **Google Sheet** — nơi MKT chọn quốc gia / mức kiểm tra và xem kết quả.
 - **GitHub Actions** — kiểm tra stream theo lịch (mặc định mỗi 3 giờ; đổi được trên dashboard).
-- **Dashboard** — `https://tienbeta.github.io/iptv_monitor/`: kết quả, nút **Chạy ngay**, trạng thái lần chạy, **Lịch chạy**.
+- **Dashboard** — `https://tienbeta.github.io/iptv_monitor/`: kết quả, nút **Chạy ngay**, trạng thái lần chạy, **Cài đặt** (mức kiểm tra + lịch tự chạy).
 
 Thứ tự: A (Sheet) → B (GitHub) → C (chạy lần đầu) → D (chia sẻ cho MKT).
 Đã cài bản cũ (lịch chạy bằng cron của GitHub)? Làm mục **E. Cập nhật lên bản mới**.
@@ -32,7 +32,7 @@ Thứ tự: A (Sheet) → B (GitHub) → C (chạy lần đầu) → D (chia s�
 4. Nếu lần đầu Google chỉ xin quyền mà không chạy, chọn lại **IPTV Monitor → Quản trị → Cài đặt ban đầu**.
 5. Hộp thoại hiện **Bridge token** (chuỗi 64 ký tự). **Copy lại** — dùng ở bước B3.
    (Xem lại bất cứ lúc nào: **IPTV Monitor → Quản trị → Xem bridge token**.)
-   Hộp thoại cũng có **mã thao tác dashboard** (mã ngẫu nhiên dạng `ABCD-EFGH`, dùng ở mục D) và lịch tự chạy mặc định.
+   Hộp thoại cũng có **mã thao tác dashboard** (mã ngẫu nhiên dạng `ABCD-EFGH`, dùng ở mục D; đổi được) và lịch tự chạy mặc định.
    Muốn mã dễ nhớ: **IPTV Monitor → Quản trị → Đặt / đổi mã thao tác dashboard** → gõ mã của bạn (VD `VULCAN-2026`).
 
 Sheet giờ có: `Config`, `Exclude`, `Streams` và `_data` (ẩn).
@@ -129,12 +129,11 @@ Khoảng 1–2 phút sau mở <https://tienbeta.github.io/iptv_monitor/>.
    - Muốn chạy ngay: menu **IPTV Monitor → Chạy ngay** (hoặc nút **Chạy ngay** trên dashboard), rồi xem ô **Trạng thái** (dòng 8). Đang ⏳ thì chưa bấm lại được — đợi ✓ Xong.
    - Các mục khác trong menu nằm ở **Quản trị** — dành cho chủ Sheet, MKT không cần bấm.
    - Sheet `Streams` tự cập nhật theo lịch; lọc/sắp xếp thoải mái, nhưng sửa tay sẽ bị ghi đè.
-4. Người được phép bấm **Chạy ngay** / đổi **Lịch chạy** trên dashboard: gửi riêng cho họ **mã thao tác**
-   (**IPTV Monitor → Quản trị → Xem mã thao tác dashboard**). Dashboard hỏi mã ở lần bấm đầu và có thể ghi nhớ trên máy đó.
-   Người chỉ xem thì không cần mã.
-   Mã **cố định** cho tới khi bạn đổi (chạy lại *Cài đặt ban đầu* cũng không đổi mã). Tự đặt mã dễ nhớ:
-   **IPTV Monitor → Quản trị → Đặt / đổi mã thao tác dashboard** → 6–32 chữ không dấu / số, có thể có dấu gạch
-   (không phân biệt hoa thường; tránh mã dễ đoán). Để trống = tạo mã ngẫu nhiên.
+4. Người được phép bấm **Chạy ngay** / đổi **Cài đặt** (mức kiểm tra, lịch tự chạy) trên dashboard: gửi riêng cho họ **mã thao tác**
+   (**IPTV Monitor → Quản trị → Đặt / đổi mã thao tác dashboard** — hộp này hiện *Mã hiện tại*; bấm Huỷ để đóng mà không đổi).
+   Dashboard hỏi mã ở lần bấm đầu và có thể ghi nhớ trên máy đó. Người chỉ xem thì không cần mã.
+   Mã **cố định** cho tới khi bạn đổi (chạy lại *Cài đặt ban đầu* cũng không đổi mã). Muốn mã dễ nhớ: cũng ở mục đó,
+   gõ mã mới (6–32 chữ không dấu / số, có thể có dấu gạch; không phân biệt hoa thường; tránh mã dễ đoán) → OK.
 
 > **Lưu ý bảo mật:** người có quyền Editor mở được Apps Script và xem được 2 token.
 > GitHub token chỉ có quyền chạy/huỷ workflow của repo này; bridge token chỉ đọc/ghi được chính Sheet này.
@@ -169,9 +168,10 @@ nút **Chạy ngay** + trạng thái trên dashboard. Làm **E1–E3 trước kh
 |---|---|
 | Xem lịch sử chạy / lỗi | GitHub → tab **Actions**. Lỗi phía Sheet: Apps Script → **Executions** |
 | Cập nhật code Apps Script | Dán code mới → Save → **Deploy → Manage deployments** → bút chì → Version: **New version** → Deploy (URL giữ nguyên) |
-| Đổi lịch tự chạy / tạm dừng | Dashboard → **Lịch chạy** → chọn *Chạy mỗi* + *Bắt đầu từ*, hoặc bỏ tick *Tự động chạy* → **Lưu lịch** (cần mã thao tác). Dừng hẳn: Actions → IPTV check → `···` → **Disable workflow** |
+| Đổi mức kiểm tra | Dashboard → **Cài đặt** → *Mức kiểm tra* → **Lưu** (cần mã thao tác), hoặc ô B6 trong Sheet. Đổi xong tự chạy lại sau ~1–2 phút |
+| Đổi lịch tự chạy / tạm dừng | Dashboard → **Cài đặt** → chọn *Chạy mỗi* + *Bắt đầu từ*, hoặc bỏ tick *Tự động chạy* → **Lưu** (cần mã thao tác). Dừng hẳn: Actions → IPTV check → `···` → **Disable workflow** |
 | GitHub token hết hạn | Làm lại B4. Trong lúc hết hạn **không có lần tự chạy nào**; dashboard / ô Trạng thái báo “Không tự chạy được…” |
-| Đặt / đổi mã thao tác | **IPTV Monitor → Quản trị → Đặt / đổi mã thao tác dashboard** → gõ mã tự chọn (hoặc để trống = ngẫu nhiên) → gửi mã mới; ai lưu mã cũ sẽ được hỏi lại |
+| Đặt / đổi mã thao tác | **IPTV Monitor → Quản trị → Đặt / đổi mã thao tác dashboard** → xem *Mã hiện tại*, hoặc gõ mã mới → gửi mã mới; ai lưu mã cũ sẽ được hỏi lại |
 | Chạy thử với stream thật, không đụng tới Sheet | Actions → **Smoke test** → Run workflow → nhập quốc gia + mức → xem **Summary** |
 | Chạy thử trên máy (tuỳ chọn, cần Node 22+) | `COUNTRIES=VN LEVEL=3 node checker/index.js` → `dist/results.json`; `npm test` để chạy test |
 
@@ -194,5 +194,5 @@ nút **Chạy ngay** + trạng thái trên dashboard. Làm **E1–E3 trước kh
 | Dashboard: “Apps Script trong Sheet chưa được cập nhật bản mới” | Web app vẫn đang chạy version cũ | Làm E1–E3 (nhớ bước **New version**) |
 | Dashboard: “Không lấy được trạng thái lần chạy” | Web app không để **Anyone**, hoặc mạng chặn `script.google.com` | Làm lại A5 với **Anyone** → New version |
 | Dashboard / ô Trạng thái: “Không tự chạy được lượt …: GitHub token …” | Token hết hạn hoặc thiếu quyền | Làm lại B4 |
-| Dashboard: “Mã thao tác không đúng” / “Nhập sai mã quá nhiều lần” | Sai mã, hoặc mã đã được đổi | Lấy mã ở **IPTV Monitor → Quản trị → Xem mã thao tác dashboard**; bị khoá thì đợi 15 phút |
-| Tab Actions không có lần tự chạy | Chưa làm E2 (trigger `autoRun` chưa được bật) hoặc lịch đang tắt | Làm E2; kiểm tra Apps Script → **Triggers** có `autoRun` mỗi 10 phút; xem **Lịch chạy** trên dashboard |
+| Dashboard: “Mã thao tác không đúng” / “Nhập sai mã quá nhiều lần” | Sai mã, hoặc mã đã được đổi | Lấy mã ở **IPTV Monitor → Quản trị → Đặt / đổi mã thao tác dashboard**; bị khoá thì đợi 15 phút |
+| Tab Actions không có lần tự chạy | Chưa làm E2 (trigger `autoRun` chưa được bật) hoặc lịch đang tắt | Làm E2; kiểm tra Apps Script → **Triggers** có `autoRun` mỗi 10 phút; xem **Cài đặt** trên dashboard |

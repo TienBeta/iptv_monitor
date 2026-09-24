@@ -198,6 +198,10 @@ svg { fill: currentColor; }
 .dialog form { display: flex; flex-direction: column; gap: 14px; padding: 20px 24px; }
 .dialog-title { margin: 0; font-size: 18px; font-weight: 500; }
 .dialog-text { margin: 0; color: var(--text-2); font-size: 13px; }
+.dialog-section { display: flex; flex-direction: column; gap: 12px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.dialog-section + .dialog-section { padding-top: 14px; border-top: 1px solid var(--divider); }
+.section-title { margin-bottom: 2px; padding: 0; font-size: 14px; font-weight: 600; }
+.field-hint.level-note { color: var(--primary); }
 .field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .field-label { color: var(--text-2); font-size: 12px; font-weight: 500; }
 .field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
@@ -345,7 +349,7 @@ button.metric:hover { border-color: var(--border-strong); box-shadow: var(--shad
   fill: var(--text-3);
   pointer-events: none;
 }
-.search input, .toolbar select, .field input, .field select {
+.search input, .toolbar select, .field input, .field select, .field-select {
   height: 36px;
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
@@ -356,7 +360,7 @@ button.metric:hover { border-color: var(--border-strong); box-shadow: var(--shad
 .search input { width: 100%; padding: 0 10px 0 36px; }
 .search input::placeholder, .field input::placeholder { color: var(--text-3); }
 .field input { width: 100%; padding: 0 12px; }
-.toolbar select, .field select {
+.toolbar select, .field select, .field-select {
   flex: 0 1 210px;
   min-width: 0;
   padding: 0 32px 0 12px;
@@ -367,9 +371,9 @@ button.metric:hover { border-color: var(--border-strong); box-shadow: var(--shad
   background-size: 20px;
   text-overflow: ellipsis;
 }
-.field select { flex: none; width: 100%; }
-.search input:hover, .toolbar select:hover, .field input:hover, .field select:hover { border-color: #bdc1c6; }
-.search input:focus, .toolbar select:focus, .field input:focus, .field select:focus {
+.field select, .field-select { flex: none; width: 100%; }
+.search input:hover, .toolbar select:hover, .field input:hover, .field select:hover, .field-select:hover { border-color: #bdc1c6; }
+.search input:focus, .toolbar select:focus, .field input:focus, .field select:focus, .field-select:focus {
   outline: none;
   border-color: var(--primary);
   box-shadow: inset 0 0 0 1px var(--primary);

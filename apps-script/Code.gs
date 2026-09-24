@@ -10,7 +10,7 @@
  * - Sửa Config / Exclude: tự hẹn chạy lại sau khoảng 1 phút.
  * - Lịch tự chạy: trigger autoRun (mỗi 10 phút) chạy workflow đúng các giờ đã hẹn.
  * - Dashboard: xem trạng thái (doGet ?action=status, ai cũng xem được);
- *   "Chạy ngay" và đổi lịch (doPost run / schedule) cần mã thao tác.
+ *   "Chạy ngay", đổi mức kiểm tra và lịch (doPost run / settings) cần mã thao tác.
  *
  * Cài đặt từng bước: docs/setup.md trong repo.
  */
@@ -72,7 +72,6 @@ function onOpen() {
       .addItem('Nhập GitHub token', 'setGithubToken')
       .addItem('Xem bridge token', 'showBridgeToken')
       .addSeparator()
-      .addItem('Xem mã thao tác dashboard', 'showDashboardCode')
       .addItem('Đặt / đổi mã thao tác dashboard', 'setDashboardCode'))
     .addToUi();
 }
@@ -118,10 +117,26 @@ function showBridgeToken() {
     'try{navigator.clipboard.writeText(e.value)}catch(x){}document.execCommand("copy");' +
     'document.getElementById(id+"s").textContent="Đã copy";}</script></div>',
   ).setWidth(560).setHeight(url ? 330 : 250);
-  try {
-    SpreadsheetApp.getUi().showModalDialog(html, 'Bridge token');
-  } catch (err) {
+  const ui = sheetUi_();
+  if (!ui) {
     Logger.log(token); // run from the editor: no UI
+    return;
+  }
+  try {
+    ui.showModalDialog(html, 'Bridge token');
+  } catch (err) {
+    // HTML dialogs can fail (e.g. several Google accounts signed in): a plain alert always opens.
+    ui.alert('Bridge token', 'Token (secret SHEET_BRIDGE_TOKEN):\n' + token + '\n\nMã kiểm tra: ' + tokenCode_(token) +
+      (url ? '\n\nWeb app URL (secret SHEET_BRIDGE_URL):\n' + url : ''), ui.ButtonSet.OK);
+  }
+}
+
+// The Sheet's UI, or null when run from the Apps Script editor / a trigger.
+function sheetUi_() {
+  try {
+    return SpreadsheetApp.getUi();
+  } catch (err) {
+    return null;
   }
 }
 
@@ -139,27 +154,21 @@ function tokenCode_(token) {
 }
 
 // The operator code lets the dashboard start a run and change the schedule.
-function showDashboardCode() {
-  const code = PropertiesService.getScriptProperties().getProperty('DASHBOARD_CODE') || saveNewCode_();
-  showCodeDialog_(code);
-}
-
-// The owner picks a code that is easy to share (e.g. VULCAN-2026), or leaves it
-// empty for a random one. The code stays until it is set again here.
+// One menu item for it: the prompt shows the current code; typing a new one
+// (e.g. VULCAN-2026) replaces it, empty / Huỷ keeps it. It never changes by itself.
 function setDashboardCode() {
   const ui = SpreadsheetApp.getUi();
-  const res = ui.prompt('Đặt mã thao tác dashboard',
-    'Nhập mã mới: 6–32 chữ không dấu hoặc số, có thể thêm dấu gạch / khoảng trắng (được bỏ qua, ' +
-    'không phân biệt hoa thường). Tránh mã dễ đoán như 123456.\n' +
-    'Để trống rồi bấm OK = tạo mã ngẫu nhiên.\n\n' +
-    'Mã cũ hết hiệu lực ngay; ai đã lưu mã cũ trên dashboard sẽ phải nhập mã mới.',
+  const current = PropertiesService.getScriptProperties().getProperty('DASHBOARD_CODE') || saveNewCode_();
+  const res = ui.prompt('Mã thao tác dashboard',
+    'Mã hiện tại: ' + current + '\n' +
+    'Dùng trên dashboard khi bấm "Chạy ngay" hoặc "Cài đặt" (' + DASHBOARD_URL + '). Chỉ xem kết quả thì không cần mã.\n\n' +
+    'Đổi mã: nhập mã mới rồi bấm OK — 6–32 chữ không dấu hoặc số, có thể thêm dấu gạch / khoảng trắng ' +
+    '(không phân biệt hoa thường; tránh mã dễ đoán như 123456). Mã cũ hết hiệu lực ngay.\n' +
+    'Giữ mã hiện tại: để trống hoặc bấm Huỷ.',
     ui.ButtonSet.OK_CANCEL);
   if (res.getSelectedButton() !== ui.Button.OK) return;
   const typed = res.getResponseText().trim();
-  if (!typed) {
-    showCodeDialog_(saveNewCode_());
-    return;
-  }
+  if (!typed) return;
   const problem = codeProblem_(typed);
   if (problem) {
     ui.alert(problem + '\n\nMã cũ vẫn giữ nguyên.');
@@ -178,24 +187,20 @@ function codeProblem_(typed) {
   return null;
 }
 
+// A plain alert: always opens (unlike HTML dialogs), and an 8–32 character code is easy to copy by hand.
 function showCodeDialog_(code) {
-  const html = HtmlService.createHtmlOutput(
-    '<div style="font:14px Arial,sans-serif;line-height:1.5">' +
-    '<p>Nhập mã này trên dashboard khi bấm <b>Chạy ngay</b> hoặc đổi <b>Lịch chạy</b>. ' +
-    'Xem trạng thái thì không cần mã.</p>' +
-    copyBox_('c', code) +
-    '<p>Dashboard: <a href="' + DASHBOARD_URL + '" target="_blank">' + DASHBOARD_URL + '</a></p>' +
-    '<p style="color:#5f6368">Chỉ gửi mã cho người được phép chạy kiểm tra. Lộ mã thì dùng menu ' +
-    '<b>Đặt / đổi mã thao tác dashboard</b>.</p>' +
-    '<script>function cp(id){var e=document.getElementById(id);e.select();' +
-    'try{navigator.clipboard.writeText(e.value)}catch(x){}document.execCommand("copy");' +
-    'document.getElementById(id+"s").textContent="Đã copy";}</script></div>',
-  ).setWidth(480).setHeight(280);
-  try {
-    SpreadsheetApp.getUi().showModalDialog(html, 'Mã thao tác dashboard');
-  } catch (err) {
+  const ui = sheetUi_();
+  if (!ui) {
     Logger.log(code); // run from the editor: no UI
+    return;
   }
+  ui.alert('Đã đổi mã thao tác dashboard',
+    'Mã: ' + code + '\n\n' +
+    'Dùng trên dashboard khi bấm "Chạy ngay" hoặc "Cài đặt" (dashboard hỏi mã ở lần bấm đầu). ' +
+    'Chỉ xem kết quả thì không cần mã.\n\n' +
+    'Dashboard: ' + DASHBOARD_URL + '\n\n' +
+    'Chỉ gửi mã cho người được phép chạy kiểm tra. Đổi mã: IPTV Monitor → Quản trị → Đặt / đổi mã thao tác dashboard.',
+    ui.ButtonSet.OK);
 }
 
 function saveNewCode_() {
@@ -233,7 +238,7 @@ function checkCode_(given) {
   const props = PropertiesService.getScriptProperties();
   const code = props.getProperty('DASHBOARD_CODE');
   if (!code) {
-    return { error: 'no_code', message: 'Sheet chưa có mã thao tác — chủ Sheet mở menu IPTV Monitor → Quản trị → Xem mã thao tác dashboard.' };
+    return { error: 'no_code', message: 'Sheet chưa có mã thao tác — chủ Sheet mở menu IPTV Monitor → Quản trị → Đặt / đổi mã thao tác dashboard.' };
   }
   const now = Date.now();
   let fails = JSON.parse(props.getProperty('CODE_FAILS') || 'null');
@@ -289,6 +294,8 @@ function setupConfigSheet_(ss) {
   }
   if (sh.getRange('A9').getValue() !== 'Thông báo') layoutRunRows_(sh);
   if (sh.getRange(PROGRESS_ROW, 2).getValue() === '') setProgress_('Sẵn sàng', ACTIONS_URL, 'idle', { phase: 'idle' });
+  sh.getRange('C6').setValue('Mức càng cao càng chắc chắn nhưng chạy lâu hơn. Đổi ở đây hoặc trên dashboard (nút "Cài đặt")');
+  sh.getRange('C7').setValue('Đổi trên dashboard: nút "Cài đặt"');
   sh.getRange('B6').setDataValidation(SpreadsheetApp.newDataValidation()
     .requireValueInList(LEVEL_OPTIONS, true).setAllowInvalid(false).build());
   sh.getRange('A1').setFontWeight('bold').setFontSize(13);
@@ -312,7 +319,7 @@ function layoutRunRows_(sh) {
   sh.getRange('B7').clearDataValidations(); // the old checkbox
   sh.getRange('A7:C7').clearContent();
   sh.getRange('A9:C30').clearContent();
-  sh.getRange('A7:C7').setValues([['Lịch tự chạy', '', 'Đổi trên dashboard: nút "Lịch chạy"']]);
+  sh.getRange('A7').setValue('Lịch tự chạy');
   sh.getRange('A8').setValue('Trạng thái');
   sh.getRange('A9').setValue('Thông báo');
   sh.getRange('A' + SUMMARY_HEADER_ROW).setValue('LẦN CHẠY GẦN NHẤT');
@@ -689,11 +696,15 @@ function validHour_(h) {
   return h !== '' && h !== null && n >= 0 && n <= 23 && Math.floor(n) === n;
 }
 
-function saveSchedule_(input) {
+function validSchedule_(input) {
   input = input || {};
   if (SCHEDULE_HOURS.indexOf(Number(input.everyHours)) < 0) throw new Error('Chu kỳ chạy không hợp lệ.');
   if (!validHour_(input.startHour)) throw new Error('Giờ bắt đầu không hợp lệ.');
-  const s = { enabled: input.enabled !== false, everyHours: Number(input.everyHours), startHour: Number(input.startHour) };
+  return { enabled: input.enabled !== false, everyHours: Number(input.everyHours), startHour: Number(input.startHour) };
+}
+
+function saveSchedule_(input) {
+  const s = validSchedule_(input);
   const props = PropertiesService.getScriptProperties();
   props.setProperty('SCHEDULE', JSON.stringify(s));
   // The new plan starts at its next time, not with a catch-up run right now.
@@ -787,8 +798,16 @@ function statusPayload_() {
       next: nextRunAt_(s, now),
     },
     everyHoursOptions: SCHEDULE_HOURS,
+    config: { level: currentLevel_() },
+    levelOptions: LEVEL_OPTIONS,
     ready: { github: !!props.getProperty('GITHUB_TOKEN'), code: !!props.getProperty('DASHBOARD_CODE') },
   };
+}
+
+// Config!B6, the level the next run uses.
+function currentLevel_() {
+  const sh = SpreadsheetApp.getActive().getSheetByName(SHEET.config);
+  return sh ? String(sh.getRange('B6').getValue()) : '';
 }
 
 function handleControl_(req) {
@@ -806,12 +825,33 @@ function handleControl_(req) {
       status: statusPayload_(),
     };
   }
+  // "settings": level and/or schedule ("schedule" from older dashboards). All is
+  // checked before anything is saved; only what changed is saved.
+  let schedule = null;
+  let level = null;
   try {
-    saveSchedule_(req.schedule);
+    if (req.schedule) {
+      schedule = validSchedule_(req.schedule);
+      if (JSON.stringify(schedule) === JSON.stringify(readSchedule_())) schedule = null;
+    }
+    if (req.level !== undefined && req.level !== null && req.level !== '') {
+      if (LEVEL_OPTIONS.indexOf(String(req.level)) < 0) throw new Error('Mức kiểm tra không hợp lệ.');
+      if (String(req.level) !== currentLevel_()) level = String(req.level);
+    }
   } catch (err) {
     return { ok: false, error: 'invalid', message: err.message };
   }
-  return { ok: true, message: 'Đã lưu lịch tự chạy.', status: statusPayload_() };
+  if (schedule) saveSchedule_(schedule);
+  if (level) {
+    // Same as editing B6 in the Sheet: one run with the new level in about a minute.
+    SpreadsheetApp.getActive().getSheetByName(SHEET.config).getRange('B6').setValue(level);
+    scheduleRun_();
+    setMessage_('Mức kiểm tra đổi thành "' + level + '" từ dashboard lúc ' + hhmm_(new Date()) +
+      ' — sẽ tự chạy lại sau khoảng 1–2 phút.');
+  }
+  const message = level ? 'Đã lưu. Sẽ tự chạy lại với mức kiểm tra mới sau khoảng 1–2 phút.'
+    : schedule ? 'Đã lưu lịch tự chạy.' : 'Không có gì thay đổi.';
+  return { ok: true, message: message, status: statusPayload_() };
 }
 
 // The checker calls "load" when a run starts. A run not started from the
@@ -842,7 +882,7 @@ function doGet(e) {
 function doPost(e) {
   try {
     const req = JSON.parse((e && e.postData && e.postData.contents) || '{}');
-    if (req.action === 'run' || req.action === 'schedule') return json_(handleControl_(req));
+    if (req.action === 'run' || req.action === 'schedule' || req.action === 'settings') return json_(handleControl_(req));
     const expected = String(PropertiesService.getScriptProperties().getProperty('BRIDGE_TOKEN') || '').trim();
     const given = String(req.token || '').trim();
     if (!expected) {

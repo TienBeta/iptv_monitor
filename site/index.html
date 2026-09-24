@@ -43,7 +43,7 @@
         <span id="schedule-text"></span>
       </p>
       <div class="run-actions">
-        <button id="schedule-open" class="btn" type="button" disabled>Lịch chạy</button>
+        <button id="schedule-open" class="btn" type="button" disabled>Cài đặt</button>
         <button id="run-now" class="btn btn-primary" type="button" disabled>
           <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
           <span id="run-now-label">Chạy ngay</span>
@@ -117,18 +117,27 @@
   </main>
   <dialog id="schedule-dialog" class="dialog" aria-labelledby="schedule-title">
     <form id="schedule-form" method="dialog">
-      <h2 id="schedule-title" class="dialog-title">Lịch tự chạy</h2>
-      <label class="check-row"><input id="sch-enabled" type="checkbox"> Tự động chạy kiểm tra theo lịch</label>
-      <div class="field-grid">
-        <label class="field"><span class="field-label">Chạy mỗi</span><select id="sch-every"></select></label>
-        <label class="field"><span class="field-label">Bắt đầu từ</span><select id="sch-start"></select></label>
-      </div>
-      <p id="sch-preview" class="field-hint"></p>
-      <p class="field-hint">Giờ Việt Nam. Mỗi lượt bắt đầu trong khoảng 10 phút sau giờ hẹn; nếu lần chạy trước chưa xong thì bỏ qua lượt đó.</p>
+      <h2 id="schedule-title" class="dialog-title">Cài đặt kiểm tra</h2>
+      <fieldset id="level-section" class="dialog-section">
+        <legend class="section-title">Mức kiểm tra</legend>
+        <select id="set-level" class="field-select" aria-label="Mức kiểm tra"></select>
+        <p id="level-hint" class="field-hint"></p>
+        <p id="level-note" class="field-hint level-note" hidden>Lưu xong, hệ thống tự chạy lại với mức mới sau khoảng 1–2 phút.</p>
+      </fieldset>
+      <fieldset class="dialog-section">
+        <legend class="section-title">Lịch tự chạy</legend>
+        <label class="check-row"><input id="sch-enabled" type="checkbox"> Tự động chạy kiểm tra theo lịch</label>
+        <div class="field-grid">
+          <label class="field"><span class="field-label">Chạy mỗi</span><select id="sch-every"></select></label>
+          <label class="field"><span class="field-label">Bắt đầu từ</span><select id="sch-start"></select></label>
+        </div>
+        <p id="sch-preview" class="field-hint"></p>
+        <p class="field-hint">Giờ Việt Nam. Mỗi lượt bắt đầu trong khoảng 10 phút sau giờ hẹn; nếu lần chạy trước chưa xong thì bỏ qua lượt đó.</p>
+      </fieldset>
       <p id="sch-error" class="form-error" role="alert" hidden></p>
       <div class="dialog-actions">
         <button class="text-btn" type="button" data-close>Huỷ</button>
-        <button id="sch-save" class="btn btn-primary" type="submit">Lưu lịch</button>
+        <button id="sch-save" class="btn btn-primary" type="submit">Lưu</button>
       </div>
     </form>
   </dialog>
@@ -136,7 +145,7 @@
   <dialog id="code-dialog" class="dialog" aria-labelledby="code-title">
     <form id="code-form" method="dialog">
       <h2 id="code-title" class="dialog-title">Nhập mã thao tác</h2>
-      <p class="dialog-text">Cần mã để chạy kiểm tra hoặc đổi lịch. Người quản lý Google Sheet lấy mã ở menu <b>IPTV Monitor → Quản trị → Xem mã thao tác dashboard</b>.</p>
+      <p class="dialog-text">Cần mã để chạy kiểm tra hoặc đổi cài đặt. Người quản lý Google Sheet lấy mã ở menu <b>IPTV Monitor → Quản trị → Đặt / đổi mã thao tác dashboard</b>.</p>
       <label class="field"><span class="field-label">Mã thao tác</span>
         <input id="code-input" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="VD: ABCD-EFGH"></label>
       <label class="check-row"><input id="code-remember" type="checkbox" checked> Ghi nhớ trên máy này</label>

@@ -164,10 +164,12 @@ Thêm: lọc theo **Lý do**; thẻ *Không hoạt động* ghi số link *bị 
 cột **Hoạt động lần cuối** (thay *Kiểm tra lúc* vì mọi link được kiểm tra cùng lúc); **So với lần chạy trước**:
 *mới lỗi* (đang hoạt động → lỗi), *hoạt động lại*, *link mới*, số link bị bỏ khỏi danh sách (bấm để lọc) và ▲▼ trên thẻ
 (chỉ tính các link có ở cả hai lần chạy).
+Nút **Cài đặt** (cần mã thao tác): đổi **mức kiểm tra** (ghi vào ô B6 của Sheet, rồi tự chạy lại sau ~1–2 phút như khi sửa trong Sheet)
+và **lịch tự chạy**; kiểm tra hợp lệ hết rồi mới lưu, chỉ lưu phần thay đổi. Phạm vi (quốc gia / ngôn ngữ / thể loại) và Exclude vẫn chỉ sửa trong Sheet.
 
 ## 7. Schedule
 
-- Lịch nằm trong Apps Script (trigger `autoRun` mỗi 10 phút), mặc định mỗi 3 giờ: 01:00, 04:00, …, 22:00 giờ VN; lượt chạy bắt đầu trong ~10 phút sau giờ hẹn. Đổi trên dashboard (**Lịch chạy**). Không dùng cron của GitHub nữa (để đổi lịch không phải sửa file workflow).
+- Lịch nằm trong Apps Script (trigger `autoRun` mỗi 10 phút), mặc định mỗi 3 giờ: 01:00, 04:00, …, 22:00 giờ VN; lượt chạy bắt đầu trong ~10 phút sau giờ hẹn. Đổi trên dashboard (**Cài đặt**). Không dùng cron của GitHub nữa (để đổi lịch không phải sửa file workflow).
 - Đánh đổi: lịch tự chạy cần GitHub token trong Sheet còn hạn — hết hạn thì không tự chạy (dashboard + ô Trạng thái báo lỗi).
 - Chạy tay: menu **IPTV Monitor → Chạy ngay**, nút **Chạy ngay** trên dashboard (cần mã thao tác), hoặc nút Run workflow trên GitHub.
 - Dashboard hiện trạng thái lần chạy (đang chờ / đang chạy / xong / lỗi, có link GitHub) cho mọi người; chạy ngay và đổi lịch cần mã thao tác 8 ký tự (sai 10 lần → khoá 15 phút).
