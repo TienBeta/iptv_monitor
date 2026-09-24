@@ -92,8 +92,11 @@ describe('toàn bộ luồng qua Google Sheet (giả lập)', () => {
     assert.equal(byTitle('VTV2')[4], 'Đang lỗi'); // first failure
     assert.equal(byTitle('VTV2')[5], 'Bị chặn truy cập (có thể do giới hạn quốc gia)');
     assert.equal(byTitle('VTV1')[2], '🇻🇳 Việt Nam');
-    assert.equal(config('A11'), 'Nguồn dữ liệu');
-    assert.equal(config('B11'), 'Bình thường');
+    assert.equal(config('A12'), 'Nguồn dữ liệu');
+    assert.equal(config('B12'), 'Bình thường');
+    assert.equal(config('A13'), 'Kết quả');
+    assert.equal(config('B13'), '5 link: 4 hoạt động · 1 đang lỗi');
+    assert.equal(config('A14'), 'Thời gian chạy');
     const data = results();
     assert.equal(data.total, 5);
     assert.equal(data.counts.ONLINE, 4);
@@ -101,6 +104,14 @@ describe('toàn bộ luồng qua Google Sheet (giả lập)', () => {
     assert.ok(!('referrer' in data.streams[0]));
     assert.deepEqual(data.streams.find((x) => x.title === 'VTV2').labels, ['Geo-blocked']);
     assert.equal(data.controlUrl, web.url); // dashboard "Chạy ngay" / trạng thái
+    // first run: nothing to compare with
+    assert.equal(data.previousAt, null);
+    assert.ok(data.streams.every((x) => !('prev' in x)));
+    const vtv2 = data.streams.find((x) => x.title === 'VTV2');
+    assert.equal(vtv2.blocked, true); // HTTP 403
+    assert.equal(vtv2.lastOnline, 0);
+    assert.ok(data.streams.find((x) => x.title === 'VTV1').lastOnline > 0);
+    assert.ok(!('blocked' in data.streams.find((x) => x.title === 'VTV1')));
   });
   test('lần 2: lỗi lần thứ 2 → Không hoạt động; stream vừa chết → Đang lỗi', async () => {
     streams.breakFlip();
@@ -108,6 +119,13 @@ describe('toàn bộ luồng qua Google Sheet (giả lập)', () => {
     assert.equal(byTitle('VTV2')[4], 'Không hoạt động');
     assert.equal(byTitle('VTV3')[4], 'Đang lỗi');
     assert.equal(byTitle('VTV3')[5], 'Link không còn tồn tại');
+    const data = results();
+    const first = data.streams.find((x) => x.title === 'VTV1');
+    assert.ok(data.previousAt > 0 && data.previousAt < data.generatedAt);
+    assert.equal(data.streams.find((x) => x.title === 'VTV3').prev, 'ONLINE'); // mới lỗi
+    assert.equal(data.streams.find((x) => x.title === 'VTV2').prev, 'FAILING');
+    assert.ok(!('prev' in first)); // unchanged
+    assert.ok(first.firstSeen < first.lastChecked);
     const firstSeen = gas.sheet('_data').rows();
     const header = firstSeen[0];
     const vtv1 = firstSeen.find((r) => r[header.indexOf('title')] === 'VTV1');
@@ -119,7 +137,7 @@ describe('toàn bộ luồng qua Google Sheet (giả lập)', () => {
     assert.equal(summary.sourceStatus, 'SOURCE_ERROR');
     assert.equal(summary.total, 5);
     assert.equal(byTitle('VTV3')[4], 'Không hoạt động'); // checked again from the old list
-    assert.match(config('B11'), /^Lỗi nguồn, đang dùng danh sách cũ/);
+    assert.match(config('B12'), /^Lỗi nguồn, đang dùng danh sách cũ/);
     assert.equal(results().sourceStatus, 'SOURCE_ERROR');
   });
   test('API trả rỗng → SOURCE_ERROR, không xoá dữ liệu', async () => {
@@ -141,6 +159,7 @@ describe('toàn bộ luồng qua Google Sheet (giả lập)', () => {
     assert.equal(summary.sourceStatus, 'OK');
     assert.equal(summary.total, 6);
     assert.equal(byTitle('ThaiPBS')[2], '🇹🇭 Thái Lan');
+    assert.equal(results().streams.find((x) => x.title === 'ThaiPBS').prev, ''); // new in the list
   });
   test('thu hẹp phạm vi (chỉ TH) → hợp lệ vì cấu hình đã đổi', async () => {
     gas.sheet('Config').getRange('B3').setValue('TH');
@@ -154,6 +173,7 @@ describe('toàn bộ luồng qua Google Sheet (giả lập)', () => {
     const { summary } = await run();
     assert.equal(summary.total, 4);
     assert.equal(byTitle('VTV2'), undefined);
+    assert.equal(results().removed, 1);
   });
   test('mức kiểm tra lấy từ dropdown trong Sheet', async () => {
     gas.sheet('Config').getRange('B6').setValue('1 - Link có phản hồi');

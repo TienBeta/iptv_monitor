@@ -6,7 +6,7 @@ dashboard GitHub Pages. Người dùng cuối là team MKT — mọi thứ hiể
 tiếng Việt, không thuật ngữ kỹ thuật.
 
 ```text
-Google Sheet (Config, Exclude, Streams) + Apps Script (cầu nối, menu "Chạy ngay")
+Google Sheet (Config, Exclude, Streams) + Apps Script (cầu nối, lịch tự chạy, menu "Chạy ngay")
         ▲ đọc config + trạng thái cũ │ ghi kết quả
         │                            ▼
 GitHub Actions (Node.js, chạy khi Apps Script gọi: theo lịch hoặc Chạy ngay)
@@ -30,7 +30,7 @@ GitHub Pages (dashboard tiếng Việt, đọc results.json)
 | FR7 | Cập nhật trạng thái, ngưỡng 2 lần fail liên tiếp → Không hoạt động; 1 lần thành công → Hoạt động. |
 | FR8 | Ghi kết quả vào Sheet theo batch (sheet `Streams` cho MKT, sheet ẩn `_data` cho logic) + khối "Lần chạy gần nhất". |
 | FR9 | Xuất `results.json` lên nhánh `gh-pages`; dashboard tiếng Việt đọc file này. Sheet giữ private. |
-| FR10 | Tự chạy theo lịch (mặc định mỗi 3h từ 01:00 giờ VN; đổi chu kỳ 1/2/3/4/6/8/12/24h + giờ bắt đầu, hoặc tắt, trên dashboard) — trigger Apps Script mỗi 10 phút gọi GitHub API; lượt nào gặp lần chạy trước chưa xong thì bỏ qua. Chạy tay bằng ô tick **Chạy ngay** trong `Config`, menu **IPTV Monitor → Chạy ngay**, hoặc nút **Chạy ngay** trên dashboard. |
+| FR10 | Tự chạy theo lịch (mặc định mỗi 3h từ 01:00 giờ VN; đổi chu kỳ 1/2/3/4/6/8/12/24h + giờ bắt đầu, hoặc tắt, trên dashboard) — trigger Apps Script mỗi 10 phút gọi GitHub API; lượt nào gặp lần chạy trước chưa xong thì bỏ qua. Chạy tay bằng menu **IPTV Monitor → Chạy ngay** hoặc nút **Chạy ngay** trên dashboard. |
 | FR11 | Sửa `Config` hoặc `Exclude` → tự chạy lại sau ~1 phút (gom nhiều lần sửa thành 1 lần chạy). |
 | FR12 | API iptv-org lỗi → giữ danh sách cũ, báo `SOURCE_ERROR`, vẫn check danh sách cũ. |
 
@@ -57,6 +57,10 @@ GitHub Pages (dashboard tiếng Việt, đọc results.json)
 | Ngôn ngữ | `vie` | Mã ISO 639-3, theo `languages` của feed |
 | Thể loại | `news, sports` | ID category của iptv-org |
 | Mức kiểm tra | `3` | Dropdown `1` / `2` / `3` / `4a` / `4b` — áp dụng chung cho mọi stream |
+
+Bên dưới (script tự ghi): dòng 7 **Lịch tự chạy** (đổi trên dashboard), dòng 8 **Trạng thái** lần chạy (+ link GitHub),
+dòng 9 **Thông báo**, từ dòng 10 khối **Lần chạy gần nhất**. Menu: *Chạy ngay* cho mọi người; các mục cài đặt / token / mã thao tác
+nằm trong menu con *Quản trị (chủ Sheet)*.
 
 ### Sheet `Exclude` (MKT sửa)
 
@@ -145,8 +149,8 @@ Response ms, Fail Streak, Last Checked, Last Online, First Seen.
 
 ### Sheet `Config` — khối "Lần chạy gần nhất"
 
-Thời điểm, trạng thái nguồn (OK / SOURCE_ERROR), số stream theo trạng thái, thời gian chạy,
-số stream chưa kịp check.
+Gọn 5 dòng (chi tiết xem dashboard): Thời điểm · Nguồn dữ liệu (Bình thường / Lỗi nguồn) · Kết quả
+(*84 link: 70 hoạt động · 14 không hoạt động* — bỏ trạng thái bằng 0) · Chưa kịp kiểm tra (chỉ khi > 0) · Thời gian chạy · Dashboard.
 
 ### Dashboard (tiếng Việt)
 
@@ -156,12 +160,16 @@ Trạng thái + Lý do / Kiểm tra lúc / Link (nút copy); tìm kiếm; lọc 
 Cảnh báo và Khác = không kiểm tra được / chờ) và quốc gia; nút Xoá bộ lọc; sắp xếp; nhãn
 "Giới hạn quốc gia" / "Không phát 24/7"; giờ Việt Nam; màn hình đang tải / không có kết quả /
 lỗi tải (có nút Thử lại); nền sáng, dùng được trên máy tính, tablet, điện thoại.
+Thêm: lọc theo **Lý do**; thẻ *Không hoạt động* ghi số link *bị chặn truy cập* (HTTP 403, thường do máy kiểm tra ở Mỹ);
+cột **Hoạt động lần cuối** (thay *Kiểm tra lúc* vì mọi link được kiểm tra cùng lúc); **So với lần chạy trước**:
+*mới lỗi* (đang hoạt động → lỗi), *hoạt động lại*, *link mới*, số link bị bỏ khỏi danh sách (bấm để lọc) và ▲▼ trên thẻ
+(chỉ tính các link có ở cả hai lần chạy).
 
 ## 7. Schedule
 
 - Lịch nằm trong Apps Script (trigger `autoRun` mỗi 10 phút), mặc định mỗi 3 giờ: 01:00, 04:00, …, 22:00 giờ VN; lượt chạy bắt đầu trong ~10 phút sau giờ hẹn. Đổi trên dashboard (**Lịch chạy**). Không dùng cron của GitHub nữa (để đổi lịch không phải sửa file workflow).
 - Đánh đổi: lịch tự chạy cần GitHub token trong Sheet còn hạn — hết hạn thì không tự chạy (dashboard + ô Trạng thái báo lỗi).
-- Chạy tay: tick ô **Chạy ngay** trong `Config`, menu **IPTV Monitor → Chạy ngay**, nút **Chạy ngay** trên dashboard (cần mã thao tác), hoặc nút Run workflow trên GitHub.
+- Chạy tay: menu **IPTV Monitor → Chạy ngay**, nút **Chạy ngay** trên dashboard (cần mã thao tác), hoặc nút Run workflow trên GitHub.
 - Dashboard hiện trạng thái lần chạy (đang chờ / đang chạy / xong / lỗi, có link GitHub) cho mọi người; chạy ngay và đổi lịch cần mã thao tác 8 ký tự (sai 10 lần → khoá 15 phút).
 - Sửa `Config` / `Exclude` → tự chạy sau ~1 phút.
 

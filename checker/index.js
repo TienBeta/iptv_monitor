@@ -89,6 +89,12 @@ function dashboardUrl(env) {
   return owner && repo ? `https://${owner.toLowerCase()}.github.io/${repo}/` : '';
 }
 
+// "84 link: 70 hoạt động · 14 không hoạt động" (statuses with 0 left out)
+function resultText(total, counts) {
+  const parts = STATUS_ORDER.filter((s) => counts[s]).map((s) => `${counts[s]} ${STATUS_LABELS[s].toLowerCase()}`);
+  return `${total} link${parts.length ? `: ${parts.join(' · ')}` : ''}`;
+}
+
 function scopeText(config) {
   const part = (label, list) => `${label}: ${list.length ? list.join(', ') : 'tất cả'}`;
   return [part('Quốc gia', config.countries), part('Ngôn ngữ', config.languages), part('Thể loại', config.categories)].join(' · ');
@@ -156,7 +162,7 @@ export async function runMonitor({ env = process.env, checkOptions = {}, io = {}
   // 6. New state
   const rows = items.map((it) => {
     const { prev, host, ...meta } = it;
-    return { ...meta, ...nextState(prev, results.get(it.url)) };
+    return { ...meta, ...nextState(prev, results.get(it.url)), prevStatus: prev ? prev.status : null };
   });
   const counts = countByStatus(rows);
   const unchecked = items.length - results.size;
@@ -174,14 +180,12 @@ export async function runMonitor({ env = process.env, checkOptions = {}, io = {}
     counts,
     unchecked,
     durationSec,
+    // Config sheet "LẦN CHẠY GẦN NHẤT" (the dashboard has the details)
     lines: [
       ['Nguồn dữ liệu', sourceStatus === 'OK' ? 'Bình thường' : `Lỗi nguồn, đang dùng danh sách cũ (${sourceMessage})`],
-      ['Mức kiểm tra', LEVEL_LABELS[config.level]],
-      ['Phạm vi', scopeText(config)],
-      ['Tổng số link', rows.length],
-      ...STATUS_ORDER.map((s) => [STATUS_LABELS[s], counts[s]]),
+      ['Kết quả', resultText(rows.length, counts)],
+      ...(unchecked ? [['Chưa kịp kiểm tra', `${unchecked} link (sẽ kiểm tra ở lần sau)`]] : []),
       ['Thời gian chạy', formatDuration(durationSec)],
-      ['Chưa kịp kiểm tra', unchecked],
       ['Dashboard', dashboard],
     ],
   };
@@ -194,7 +198,11 @@ export async function runMonitor({ env = process.env, checkOptions = {}, io = {}
     saveError = err;
   }
 
-  // 8. results.json for the dashboard (public: no referrer / user agent)
+  // 8. results.json for the dashboard (public: no referrer / user agent).
+  // `prev` (status in the previous run, '' = new in the list) is written only
+  // when it differs, so the dashboard can show what changed since then.
+  const hadPrevious = previousRows.length > 0;
+  const currentUrls = new Set(rows.map((r) => r.url));
   const publicData = {
     generatedAt: Date.now(),
     startedAt,
@@ -207,6 +215,8 @@ export async function runMonitor({ env = process.env, checkOptions = {}, io = {}
     counts,
     unchecked,
     durationSec,
+    previousAt: previousRows.reduce((max, r) => Math.max(max, Number(r.lastChecked) || 0), 0) || null,
+    removed: hadPrevious ? previousRows.filter((r) => !currentUrls.has(r.url)).length : 0,
     // The dashboard calls this Apps Script web app for "Chạy ngay", run status and the
     // schedule. Knowing the URL is not enough to read the Sheet (load/save need the
     // bridge token; run/schedule need the operator code).
@@ -221,7 +231,11 @@ export async function runMonitor({ env = process.env, checkOptions = {}, io = {}
       status: r.status,
       reason: reasonFor(r.status, r.error),
       lastChecked: r.lastChecked || 0,
+      lastOnline: r.lastOnline || 0,
+      firstSeen: r.firstSeen || 0,
       labels: r.labels,
+      ...(r.error === 'HTTP_403' && !['ONLINE', 'SLOW', 'PENDING'].includes(r.status) ? { blocked: true } : {}),
+      ...(hadPrevious && r.prevStatus !== r.status ? { prev: r.prevStatus || '' } : {}),
     })),
   };
   await writeFile(path.join(outDir, 'results.json'), JSON.stringify(publicData));

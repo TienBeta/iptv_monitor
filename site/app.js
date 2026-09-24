@@ -26,6 +26,16 @@
   const PAGE = 200;
   const NO_COUNTRY = 'NONE';
   const STATUS_FILTERS = ['ALL', 'ONLINE', 'WARNING', 'SLOW', 'FAILING', 'OFFLINE', 'OTHER'];
+  // Changes since the previous run, from each row's `prev` (present only when
+  // the status changed; '' = new in the list). Only working ↔ failing counts.
+  const WORKING = ['ONLINE', 'SLOW'];
+  const FAILED = ['FAILING', 'OFFLINE'];
+  const CHANGES = {
+    DOWN: { label: 'mới lỗi', tag: 'Mới lỗi', tone: 'err', arrow: '↓' },
+    UP: { label: 'hoạt động lại', tag: 'Hoạt động lại', tone: 'ok', arrow: '↑' },
+    NEW: { label: 'link mới', tag: 'Mới thêm', tone: 'neutral', arrow: '' },
+  };
+  const CHANGE_FILTERS = ['ALL', ...Object.keys(CHANGES)];
   const REFRESH_MS = 10 * 60 * 1000;
 
   const $ = (id) => document.getElementById(id);
@@ -36,7 +46,7 @@
   });
   const numFmt = new Intl.NumberFormat('vi-VN');
 
-  const state = { data: null, q: '', status: 'ALL', country: 'ALL', sort: 'status', dir: 1, shown: PAGE, loading: false };
+  const state = { data: null, q: '', status: 'ALL', country: 'ALL', reason: 'ALL', change: 'ALL', sort: 'status', dir: 1, shown: PAGE, loading: false };
   const SVG_NS = 'http://www.w3.org/2000/svg';
   const COPY_ICON = 'M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z';
 
@@ -93,18 +103,33 @@
     return row.status === state.status;
   }
 
-  const filtersActive = () => state.status !== 'ALL' || state.country !== 'ALL' || state.q.trim() !== '';
+  const filtersActive = () => state.status !== 'ALL' || state.country !== 'ALL' || state.reason !== 'ALL'
+    || state.change !== 'ALL' || state.q.trim() !== '';
 
   function clearFilters() {
     state.q = '';
     state.status = 'ALL';
     state.country = 'ALL';
+    state.reason = 'ALL';
+    state.change = 'ALL';
     state.shown = PAGE;
     $('q').value = '';
     $('status').value = 'ALL';
     $('country').value = 'ALL';
+    $('reason').value = 'ALL';
     render();
   }
+
+  function changeOf(r) {
+    if (!('prev' in r)) return null;
+    if (r.prev === '') return 'NEW';
+    if (WORKING.includes(r.prev) && FAILED.includes(r.status)) return 'DOWN';
+    if (FAILED.includes(r.prev) && WORKING.includes(r.status)) return 'UP';
+    return null;
+  }
+  const prevStatus = (r) => ('prev' in r ? r.prev : r.status);
+  const matchesReason = (r) => state.reason === 'ALL' || r.reason === state.reason;
+  const matchesChange = (r) => state.change === 'ALL' || changeOf(r) === state.change;
 
   function matchesCountry(row) {
     if (state.country === 'ALL') return true;
@@ -117,13 +142,15 @@
     const rows = state.data.streams.filter((r) =>
       matchesStatus(r) &&
       matchesCountry(r) &&
+      matchesReason(r) &&
+      matchesChange(r) &&
       (!q || r.title.toLowerCase().includes(q) || r.channel.toLowerCase().includes(q) || r.url.toLowerCase().includes(q)));
     const key = state.sort;
     const dir = state.dir;
     rows.sort((a, b) => {
       let d;
       if (key === 'status') d = (STATUS[a.status]?.rank ?? 9) - (STATUS[b.status]?.rank ?? 9);
-      else if (key === 'lastChecked') d = (a.lastChecked || 0) - (b.lastChecked || 0);
+      else if (key === 'lastOnline') d = (a.lastOnline || 0) - (b.lastOnline || 0);
       else d = collator.compare(a[key] || '', b[key] || '');
       return d * dir || collator.compare(a.title, b.title);
     });
@@ -160,6 +187,10 @@
     for (const r of scope) counts[r.status] = (counts[r.status] || 0) + 1;
     const total = scope.length;
     const sum = (list) => list.reduce((n, st) => n + (counts[st] || 0), 0);
+    // vs the previous run, over links present in both runs (new links are listed separately)
+    const both = data.previousAt ? scope.filter((r) => r.prev !== '') : [];
+    const delta = (list) => both.filter((r) => list.includes(r.status)).length - both.filter((r) => list.includes(prevStatus(r))).length;
+    const blocked = scope.filter((r) => r.blocked && r.status === 'OFFLINE').length;
     const pct = (n) => (total ? `${Math.round((n / total) * 100)}%` : '0%');
     const countryLabel = state.country === 'ALL' ? 'Tất cả quốc gia'
       : state.country === NO_COUNTRY ? 'Không rõ quốc gia' : ($('country').selectedOptions[0]?.textContent || '').replace(/\s*\([\d.,]+\)$/, '');
@@ -173,6 +204,7 @@
         sub = `Chậm ${numFmt.format(counts.SLOW || 0)} · Đang lỗi ${numFmt.format(counts.FAILING || 0)}`;
       } else {
         sub = `${pct(value)} tổng số`;
+        if (m.key === 'OFFLINE' && blocked) sub += ` · ${numFmt.format(blocked)} bị chặn truy cập`;
       }
       const active = state.status === m.key;
       const btn = el('button', `metric${active ? ' is-active' : ''}`);
@@ -185,7 +217,17 @@
         head.append(dot);
       }
       head.append(document.createTextNode(m.label));
-      btn.append(head, el('span', 'metric-value', numFmt.format(value)), el('span', 'metric-sub', sub));
+      const valueRow = el('span', 'metric-value-row');
+      valueRow.append(el('span', 'metric-value', numFmt.format(value)));
+      const d = m.statuses && both.length ? delta(m.statuses) : 0;
+      if (d) {
+        // more online is good; more warnings / offline is bad
+        const good = (d > 0) === (m.key === 'ONLINE');
+        const chip = el('span', `metric-delta tone-${good ? 'ok' : 'err'}`, `${d > 0 ? '▲' : '▼'} ${numFmt.format(Math.abs(d))}`);
+        chip.title = `${d > 0 ? 'Tăng' : 'Giảm'} ${numFmt.format(Math.abs(d))} so với lần chạy trước (${formatTime(data.previousAt)})`;
+        valueRow.append(chip);
+      }
+      btn.append(head, valueRow, el('span', 'metric-sub', sub));
       btn.addEventListener('click', () => {
         state.status = state.status === m.key && m.key !== 'ALL' ? 'ALL' : m.key;
         $('status').value = state.status;
@@ -194,6 +236,40 @@
       });
       box.append(btn);
     }
+  }
+
+  // "So với lần chạy trước": counts that work as filters. Follows the country filter.
+  function renderChanges(data) {
+    const box = $('changes');
+    box.replaceChildren();
+    box.hidden = !data.previousAt;
+    if (!data.previousAt) return;
+    const counts = { DOWN: 0, UP: 0, NEW: 0 };
+    for (const r of data.streams) {
+      const c = matchesCountry(r) && changeOf(r);
+      if (c) counts[c]++;
+    }
+    box.append(el('span', 'changes-label', `So với lần chạy trước (${formatTime(data.previousAt)}):`));
+    const keys = Object.keys(CHANGES).filter((k) => counts[k] || state.change === k);
+    for (const k of keys) {
+      const c = CHANGES[k];
+      const active = state.change === k;
+      const chip = el('button', `change-chip${active ? ' is-active' : ''}`);
+      chip.type = 'button';
+      chip.setAttribute('aria-pressed', String(active));
+      const dot = el('span', `dot tone-${c.tone}`);
+      dot.setAttribute('aria-hidden', 'true');
+      chip.append(dot, `${numFmt.format(counts[k])} ${c.label}`);
+      chip.addEventListener('click', () => {
+        state.change = active ? 'ALL' : k;
+        state.shown = PAGE;
+        render();
+      });
+      box.append(chip);
+    }
+    const removed = state.country === 'ALL' ? data.removed || 0 : 0;
+    if (removed) box.append(el('span', 'changes-note', `${numFmt.format(removed)} link đã bị bỏ khỏi danh sách`));
+    if (!keys.length && !removed) box.append(el('span', 'changes-note', 'không có kênh nào đổi trạng thái.'));
   }
 
   function renderMetricSkeleton() {
@@ -238,6 +314,17 @@
     const known = state.country === 'ALL' || countries.has(state.country) || (state.country === NO_COUNTRY && unknown > 0);
     if (!known) state.country = 'ALL';
     country.value = state.country;
+
+    // Reasons of the links that are not working, most common first.
+    const reasons = new Map();
+    for (const r of data.streams) if (r.reason) reasons.set(r.reason, (reasons.get(r.reason) || 0) + 1);
+    const reason = $('reason');
+    reason.replaceChildren(new Option('Tất cả lý do', 'ALL'), ...[...reasons.entries()]
+      .sort((a, b) => b[1] - a[1] || collator.compare(a[0], b[0]))
+      .map(([text, n]) => new Option(`${text} (${numFmt.format(n)})`, text)));
+    if (state.reason !== 'ALL' && !reasons.has(state.reason)) state.reason = 'ALL';
+    reason.value = state.reason;
+    if (!data.previousAt) state.change = 'ALL';
   }
 
   // Filters live in the page link (#country=VN&status=OFFLINE) so a filtered
@@ -249,12 +336,17 @@
     state.status = STATUS_FILTERS.includes(status) ? status : 'ALL';
     state.q = p.get('q') || '';
     $('q').value = state.q;
+    state.reason = p.get('reason') || 'ALL';
+    const change = (p.get('change') || 'ALL').toUpperCase();
+    state.change = CHANGE_FILTERS.includes(change) ? change : 'ALL';
   }
 
   function writeHash() {
     const p = new URLSearchParams();
     if (state.country !== 'ALL') p.set('country', state.country);
     if (state.status !== 'ALL') p.set('status', state.status);
+    if (state.reason !== 'ALL') p.set('reason', state.reason);
+    if (state.change !== 'ALL') p.set('change', state.change);
     if (state.q.trim()) p.set('q', state.q.trim());
     const hash = p.toString();
     if (hash !== location.hash.slice(1)) history.replaceState(null, '', hash ? `#${hash}` : location.pathname + location.search);
@@ -305,10 +397,18 @@
     const status = el('td', 'c-status');
     status.dataset.label = 'Trạng thái';
     status.append(pill(r.status));
+    const change = changeOf(r);
+    if (change) {
+      const c = CHANGES[change];
+      const tag = el('span', `change-tag tone-${c.tone}`, `${c.arrow ? `${c.arrow} ` : ''}${c.tag}`);
+      tag.title = change === 'NEW' ? 'Lần đầu có trong danh sách' : `Lần chạy trước: ${STATUS[r.prev]?.label || r.prev}`;
+      status.append(tag);
+    }
     if (r.reason) status.append(el('div', 'reason', r.reason));
 
-    const time = el('td', 'c-time', formatTime(r.lastChecked));
-    time.dataset.label = 'Kiểm tra lúc';
+    const time = el('td', 'c-time');
+    time.dataset.label = 'Hoạt động lần cuối';
+    time.append(...lastOnlineCell(r));
 
     const link = el('td', 'c-link');
     link.dataset.label = 'Link';
@@ -328,6 +428,21 @@
     return tr;
   }
 
+  // "Hoạt động lần cuối": when the link last worked. The check time is shown
+  // only when this link was not checked in the latest run (time budget ran out).
+  function lastOnlineCell(r) {
+    const out = [];
+    if (r.status === 'PENDING' || r.lastOnline === undefined) out.push(el('span', 'seen-muted', '—'));
+    else if (WORKING.includes(r.status)) out.push(el('span', 'seen-muted', 'Lần kiểm tra này'));
+    else if (r.lastOnline) out.push(el('div', null, formatTime(r.lastOnline)), el('div', 'seen-sub', ago(r.lastOnline)));
+    else out.push(el('div', null, 'Chưa ghi nhận'), el('div', 'seen-sub', r.firstSeen ? `từ ${formatTime(r.firstSeen).slice(0, 10)}` : ''));
+    const data = state.data;
+    if (r.lastChecked && data && data.startedAt && r.lastChecked < data.startedAt) {
+      out.push(el('div', 'seen-sub seen-stale', `Kiểm tra lúc ${formatTime(r.lastChecked)}`));
+    }
+    return out;
+  }
+
   function skeletonRows(n) {
     return Array.from({ length: n }, () => {
       const tr = el('tr', 'is-loading');
@@ -344,7 +459,7 @@
   // disabled until there is data to filter (render() needs state.data).
   function showView(view) {
     const ready = view === 'table' || view === 'empty';
-    for (const id of ['q', 'status', 'country']) $(id).disabled = !ready;
+    for (const id of ['q', 'status', 'country', 'reason']) $(id).disabled = !ready;
     $('rows').closest('.table-card').dataset.view = view;
     $('rows').closest('.table-scroll').hidden = view === 'error';
     $('empty').hidden = view !== 'empty';
@@ -356,6 +471,7 @@
     const data = state.data;
     writeHash();
     renderMetrics(data);
+    renderChanges(data);
     const rows = filtered();
     const body = $('rows');
     const visible = rows.slice(0, state.shown);
@@ -699,6 +815,7 @@
   $('q').addEventListener('input', (e) => { state.q = e.target.value; state.shown = PAGE; render(); });
   $('status').addEventListener('change', (e) => { state.status = e.target.value; state.shown = PAGE; render(); });
   $('country').addEventListener('change', (e) => { state.country = e.target.value; state.shown = PAGE; render(); });
+  $('reason').addEventListener('change', (e) => { state.reason = e.target.value; state.shown = PAGE; render(); });
   $('more').addEventListener('click', () => { state.shown += PAGE; render(); });
   $('clear').addEventListener('click', clearFilters);
   $('empty-clear').addEventListener('click', clearFilters);
