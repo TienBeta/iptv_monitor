@@ -599,3 +599,59 @@ describe('Code.gs — dashboard (trạng thái, Chạy ngay, mã thao tác)', ()
     });
   });
 });
+
+describe('Code.gs — dashboard đổi mức kiểm tra (settings)', () => {
+  const vn = (h, m = 0) => Date.UTC(2026, 8, 24, h - 7, m);
+  const L4B = '4b - Giải mã được hình';
+  const L3 = '3 - Tải được dữ liệu video';
+  const same = { enabled: true, everyHours: 3, startHour: 1 };
+  function withCode() {
+    const { gas } = ready();
+    gas.props.set('GITHUB_TOKEN', 't');
+    return { gas, code: gas.props.get('DASHBOARD_CODE') };
+  }
+  const reruns = (gas) => gas.triggers.filter((t) => t.handler === 'scheduledRun').length;
+
+  test('trạng thái có mức kiểm tra hiện tại (ô B6) và danh sách mức', () => {
+    const { gas } = withCode();
+    const s = gas.get({ action: 'status' });
+    assert.equal(s.config.level, L3);
+    assert.equal(s.levelOptions.length, 5);
+    assert.equal(s.levelOptions[4], L4B);
+  });
+  test('đổi mức → ghi ô B6, hẹn chạy lại ~1 phút như khi sửa trong Sheet', () => {
+    const { gas, code } = withCode();
+    const res = gas.post({ action: 'settings', code, level: L4B, schedule: same });
+    assert.equal(res.ok, true);
+    assert.match(res.message, /tự chạy lại với mức kiểm tra mới/);
+    assert.equal(gas.sheet('Config').getRange('B6').getValue(), L4B);
+    assert.equal(res.status.config.level, L4B);
+    assert.equal(reruns(gas), 1);
+    assert.match(gas.sheet('Config').getRange('B9').getValue(), /^Mức kiểm tra đổi thành "4b - Giải mã được hình" từ dashboard/);
+    gas.ctx.scheduledRun();
+    assert.equal(gas.fetches.filter((f) => f.opts.method === 'post').length, 1);
+  });
+  test('mức không hợp lệ, hoặc lịch sai kèm mức đúng → không lưu gì', () => {
+    const { gas, code } = withCode();
+    assert.equal(gas.post({ action: 'settings', code, level: '5 - Siêu', schedule: same }).error, 'invalid');
+    const bad = gas.post({ action: 'settings', code, level: L4B, schedule: { enabled: true, everyHours: 5, startHour: 1 } });
+    assert.equal(bad.error, 'invalid');
+    assert.equal(gas.sheet('Config').getRange('B6').getValue(), L3);
+    assert.equal(reruns(gas), 0);
+  });
+  test('sai mã → từ chối, không đổi mức', () => {
+    const { gas } = withCode();
+    assert.equal(gas.post({ action: 'settings', code: 'WRONG-1', level: L4B }).error, 'bad_code');
+    assert.equal(gas.sheet('Config').getRange('B6').getValue(), L3);
+  });
+  test('không đổi gì → không chạy lại, không làm mất lượt tự chạy sắp tới', () => {
+    const { gas, code } = withCode();
+    gas.ctx.Date.now = () => vn(4, 2); // lượt 04:00 chưa được trigger chạy
+    const res = gas.post({ action: 'settings', code, level: L3, schedule: same });
+    assert.equal(res.message, 'Không có gì thay đổi.');
+    assert.equal(reruns(gas), 0);
+    gas.ctx.Date.now = () => vn(4, 5);
+    gas.ctx.autoRun();
+    assert.equal(gas.fetches.filter((f) => f.opts.method === 'post').length, 1);
+  });
+});
