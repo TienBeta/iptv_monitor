@@ -571,9 +571,9 @@
     queued: { busy: true, title: 'Đang chờ chạy', detail: (r) => (r.since ? `gửi yêu cầu lúc ${when(r.since)}` : '') },
     running: { busy: true, title: 'Đang chạy kiểm tra', detail: (r) => (r.startedAt ? `bắt đầu ${when(r.startedAt)} · đã chạy ${minutesText(serverNow() - r.startedAt)}` : '') },
     success: { tone: 'ok', title: 'Đã chạy xong', detail: (r) => (r.finishedAt ? `lúc ${when(r.finishedAt)}${r.startedAt ? ` · chạy ${minutesText(r.finishedAt - r.startedAt)}` : ''}` : '') },
-    failure: { tone: 'err', title: 'Lần chạy bị lỗi', detail: (r) => (r.finishedAt ? `lúc ${when(r.finishedAt)}` : ''), link: 'Xem nguyên nhân' },
+    failure: { tone: 'err', title: 'Lần chạy bị lỗi', detail: (r) => `${r.finishedAt ? `lúc ${when(r.finishedAt)} · ` : ''}thử Chạy ngay lại; nếu vẫn lỗi, báo người quản lý` },
     cancelled: { tone: 'neutral', title: 'Lần chạy bị huỷ', detail: (r) => (r.finishedAt ? `lúc ${when(r.finishedAt)}` : '') },
-    error: { tone: 'err', title: 'Có lỗi', detail: (r) => r.message || '' },
+    error: { tone: 'err', title: 'Có lỗi', detail: (r) => `${r.message ? `${r.message} · ` : ''}báo người quản lý hệ thống` },
   };
 
   function getCode() {
@@ -660,16 +660,9 @@
     const detail = $('run-detail');
     detail.replaceChildren();
     const parts = [view.detail(run)].filter(Boolean);
-    if (!s.ready.github) parts.push('Sheet chưa nhập GitHub token nên chưa chạy được');
-    else if (!s.ready.code) parts.push('Sheet chưa tạo mã thao tác');
+    if (!s.ready.github) parts.push('chưa chạy được — báo người quản lý (Sheet thiếu GitHub token)');
+    else if (!s.ready.code) parts.push('chưa chạy được — báo người quản lý (Sheet chưa có mã thao tác)');
     detail.append(parts.join(' · '));
-    if (/^https:\/\/github\.com\//.test(run.url || '') && run.phase !== 'idle') {
-      const a = el('a', null, view.link || 'Xem trên GitHub');
-      a.href = run.url;
-      a.target = '_blank';
-      a.rel = 'noopener';
-      detail.append(parts.length ? ' · ' : '', a);
-    }
     const sch = s.schedule;
     $('schedule-text').textContent = sch.enabled
       ? `Tự chạy mỗi ${sch.everyHours} giờ${sch.next ? ` · lần tới ${when(sch.next)}` : ''}`

@@ -174,6 +174,17 @@ describe('toàn bộ luồng qua Google Sheet (giả lập)', () => {
     assert.equal(summary.total, 4);
     assert.equal(byTitle('VTV2'), undefined);
     assert.equal(results().removed, 1);
+    assert.equal(gas.sheet('Exclude').getRange('C2').getValue(), '1 link: VTV2.vn'); // "Đang bỏ"
+  });
+  test('Exclude bằng chữ: "vtv" bỏ mọi kênh VTV; cột "Đang bỏ" liệt kê kênh', async () => {
+    const link = gas.sheet('Exclude').getRange('A2').getValue();
+    gas.sheet('Exclude').getRange('A2:A3').setValues([['vtv'], ['TV']]);
+    const { summary } = await run();
+    assert.equal(summary.total, 2); // HTV7 + THVL1
+    assert.equal(byTitle('VTV1'), undefined);
+    assert.equal(gas.sheet('Exclude').getRange('C2').getValue(), '3 link: VTV1.vn, VTV2.vn, VTV3.vn');
+    assert.equal(gas.sheet('Exclude').getRange('C3').getValue(), 'Chưa dùng: cần ít nhất 3 chữ hoặc số');
+    gas.sheet('Exclude').getRange('A2:A3').setValues([[link], ['']]);
   });
   test('mức kiểm tra lấy từ dropdown trong Sheet', async () => {
     gas.sheet('Config').getRange('B6').setValue('1 - Link có phản hồi');

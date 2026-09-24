@@ -20,7 +20,7 @@ const WORKFLOW_FILE = 'check.yml';
 const GITHUB_REF = 'main';
 
 const SHEET = { config: 'Config', exclude: 'Exclude', streams: 'Streams', data: '_data' };
-// Config: B3:B6 inputs · B7 lịch tự chạy · B8 trạng thái (+ C8 link GitHub) · B9 thông báo ·
+// Config: B3:B6 inputs · B7 lịch tự chạy · B8 trạng thái · B9 thông báo ·
 // A10 "LẦN CHẠY GẦN NHẤT" · summary from row 11. The script writes everything from row 7 down.
 const CELL = { schedule: 'B7', message: 'B9' };
 const INPUT_FIRST_ROW = 3; // B3:B6 = Quốc gia, Ngôn ngữ, Thể loại, Mức kiểm tra
@@ -296,6 +296,7 @@ function setupConfigSheet_(ss) {
   if (sh.getRange(PROGRESS_ROW, 2).getValue() === '') setProgress_('Sẵn sàng', ACTIONS_URL, 'idle', { phase: 'idle' });
   sh.getRange('C6').setValue('Mức càng cao càng chắc chắn nhưng chạy lâu hơn. Đổi ở đây hoặc trên dashboard (nút "Cài đặt")');
   sh.getRange('C7').setValue('Đổi trên dashboard: nút "Cài đặt"');
+  sh.getRange('C8').clearContent(); // the old "Xem chi tiết trên GitHub" link
   sh.getRange('B6').setDataValidation(SpreadsheetApp.newDataValidation()
     .requireValueInList(LEVEL_OPTIONS, true).setAllowInvalid(false).build());
   sh.getRange('A1').setFontWeight('bold').setFontSize(13);
@@ -342,13 +343,19 @@ function showSchedule_() {
   sh.getRange(CELL.schedule).setValue(text);
 }
 
+// A: what to leave out — a name / channel ID / part of a link ("An Ninh") or a
+// full link. B: notes. C: what each line removes, written by the script after each run.
 function setupExcludeSheet_(ss) {
   const sh = ss.getSheetByName(SHEET.exclude) || ss.insertSheet(SHEET.exclude);
-  if (sh.getRange('A1').getValue() === '') sh.getRange('A1:B1').setValues([['Link cần bỏ qua', 'Ghi chú']]);
-  sh.getRange('A1:B1').setFontWeight('bold').setBackground('#f1f3f4');
+  sh.getRange('A1:C1').setValues([[
+    'Bỏ qua: tên kênh, mã kênh hoặc link (VD: An Ninh)', 'Ghi chú', 'Đang bỏ (tự cập nhật sau mỗi lần chạy)',
+  ]]);
+  sh.getRange('A1:C1').setFontWeight('bold').setBackground('#f1f3f4');
   sh.setFrozenRows(1);
-  sh.setColumnWidth(1, 520);
-  sh.setColumnWidth(2, 300);
+  sh.setColumnWidth(1, 420);
+  sh.setColumnWidth(2, 260);
+  sh.setColumnWidth(3, 420);
+  protectOnce_(sh, 'C:C', 'Kết quả loại trừ (script tự ghi)');
 }
 
 function setupStreamsSheet_(ss) {
@@ -415,7 +422,7 @@ function onConfigEdit(e) {
     }
     return;
   }
-  if (name === SHEET.exclude) {
+  if (name === SHEET.exclude && range.getColumn() === 1) { // notes (B) and the report (C) don't count
     scheduleRun_();
     setMessage_('Danh sách loại trừ vừa thay đổi — sẽ tự chạy lại sau khoảng 1–2 phút.');
   }
@@ -570,7 +577,7 @@ function watchRun() {
   const watch = readWatch_();
   if (!watch || Date.now() - watch.since > WATCH_MAX_MS) {
     if (watch) {
-      const msg = 'Quá 3 giờ chưa thấy kết quả lần chạy — xem trên GitHub';
+      const msg = 'Quá 3 giờ chưa thấy kết quả lần chạy — báo người quản lý kiểm tra';
       setProgress_(msg, ACTIONS_URL, 'error', { phase: 'error', message: msg });
     }
     stopWatch_();
@@ -589,8 +596,8 @@ function watchRun() {
     : runs.find(function (r) { return createdAt_(r) >= watch.since - 60 * 1000; });
   if (!run) {
     if (Date.now() - watch.since > 15 * 60 * 1000) {
-      setProgress_('GitHub chưa bắt đầu chạy sau 15 phút — bấm link bên cạnh để xem', ACTIONS_URL, 'error',
-        { phase: 'error', message: 'GitHub chưa bắt đầu chạy sau 15 phút' });
+      const msg = 'GitHub chưa bắt đầu chạy sau 15 phút — thử Chạy ngay lại sau ít phút';
+      setProgress_(msg, ACTIONS_URL, 'error', { phase: 'error', message: msg });
       stopWatch_();
     }
     return;
@@ -623,7 +630,7 @@ function showRun_(run) {
   } else if (run.conclusion === 'cancelled') {
     setProgress_('Đã huỷ lúc ' + at, run.html_url, 'idle', Object.assign({ phase: 'cancelled' }, times));
   } else {
-    setProgress_('✗ Lỗi lúc ' + at + ' — bấm link bên cạnh để xem nguyên nhân', run.html_url, 'error',
+    setProgress_('✗ Lỗi lúc ' + at + ' — thử Chạy ngay lại; nếu vẫn lỗi, báo người quản lý', run.html_url, 'error',
       Object.assign({ phase: 'failure' }, times));
   }
 }
@@ -658,7 +665,8 @@ function createdAt_(run) {
 }
 
 // Run status: Config row 8 for the Sheet, RUN_STATE (phase + times) for the dashboard.
-// phase: idle | queued | running | success | failure | cancelled | error
+// phase: idle | queued | running | success | failure | cancelled | error. The GitHub
+// run link is kept in RUN_STATE for the owner, but not shown to MKT.
 function setProgress_(text, url, tone, state) {
   PropertiesService.getScriptProperties().setProperty('RUN_STATE',
     JSON.stringify(Object.assign({ phase: 'idle' }, state, { url: url || ACTIONS_URL, at: Date.now() })));
@@ -666,8 +674,6 @@ function setProgress_(text, url, tone, state) {
   if (!sh) return;
   sh.getRange(PROGRESS_ROW, 1, 1, 2).setValues([['Trạng thái', text]]);
   sh.getRange(PROGRESS_ROW, 2).setBackground(STATE_COLORS[tone] || STATE_COLORS.idle).setFontWeight('bold');
-  const link = SpreadsheetApp.newRichTextValue().setText('Xem chi tiết trên GitHub').setLinkUrl(url || ACTIONS_URL).build();
-  sh.getRange(PROGRESS_ROW, 3).setRichTextValue(link);
 }
 
 function hhmm_(date) {
@@ -951,12 +957,27 @@ function handleSave_(req) {
   writeTable_(dataSheet, req.data.header, req.data.rows, {});
   writeTable_(streamsSheet, req.streams.header, req.streams.rows, { dateColumn: req.streams.dateColumn, keepFilter: true });
   writeSummary_(ss, req.summary);
+  if (req.exclude) writeExcludeReport_(ss, req.exclude);
   PropertiesService.getScriptProperties().setProperty('LAST_RUN', JSON.stringify({
     sourceCount: req.summary.sourceCount,
     configHash: req.summary.configHash,
   }));
   SpreadsheetApp.flush();
   return { ok: true, rows: req.data.rows.length };
+}
+
+// Exclude!C: next to each line, what it removed in this run ("2 link: ANTV, …").
+function writeExcludeReport_(ss, report) {
+  const sh = ss.getSheetByName(SHEET.exclude);
+  if (!sh || sh.getLastRow() < 2) return;
+  const byEntry = {};
+  report.forEach(function (r) { byEntry[String(r.entry)] = String(r.text); });
+  const n = sh.getLastRow() - 1;
+  const values = sh.getRange(2, 1, n, 1).getDisplayValues().map(function (row) {
+    const entry = String(row[0]).trim();
+    return [entry && byEntry[entry] !== undefined ? cell_(byEntry[entry], false) : ''];
+  });
+  sh.getRange(2, 3, n, 1).setValues(values);
 }
 
 // Whole table in one setValues; keeps the MKT filter criteria on Streams.

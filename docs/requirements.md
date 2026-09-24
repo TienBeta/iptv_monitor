@@ -58,13 +58,23 @@ GitHub Pages (dashboard tiếng Việt, đọc results.json)
 | Thể loại | `news, sports` | ID category của iptv-org |
 | Mức kiểm tra | `3` | Dropdown `1` / `2` / `3` / `4a` / `4b` — áp dụng chung cho mọi stream |
 
-Bên dưới (script tự ghi): dòng 7 **Lịch tự chạy** (đổi trên dashboard), dòng 8 **Trạng thái** lần chạy (+ link GitHub),
+Bên dưới (script tự ghi): dòng 7 **Lịch tự chạy** (đổi trên dashboard), dòng 8 **Trạng thái** lần chạy,
 dòng 9 **Thông báo**, từ dòng 10 khối **Lần chạy gần nhất**. Menu: *Chạy ngay* cho mọi người; các mục cài đặt / token / mã thao tác
 nằm trong menu con *Quản trị (chủ Sheet)*.
 
 ### Sheet `Exclude` (MKT sửa)
 
-Mỗi dòng: URL cần bỏ qua + ghi chú.
+Cột A mỗi dòng một mục, cột B ghi chú, cột C **Đang bỏ** (script ghi sau mỗi lần chạy: *"2 link: An Ninh TV"*,
+*"Không khớp kênh nào"*…). Cách so khớp:
+
+| Nhập | Bỏ những link nào |
+|---|---|
+| Link đầy đủ (`https://…`) | Đúng link đó (giống hệt). Kênh có link dự phòng thì link dự phòng hiện thay |
+| Chữ (`An Ninh`, `VTV`, `dong thap`) | Link có **tên kênh / tên khác / mã kênh** chứa chữ đó **ở đầu một từ** — không phân biệt hoa thường, dấu, khoảng trắng (`An Ninh` = `anninh` → AnNinhTV.vn, "An Ninh TV"; `VTV` → VTV1, VTVcab… nhưng không "Lao SV TV"). Chữ kết thúc bằng số khớp trọn số (`VTV1` không bỏ VTV10). Không so với link |
+| Có `.` hoặc `/`, không có khoảng trắng (`vtvprime.vn`, `AnNinhTV.vn`) | Như chữ, và thêm mọi link chứa đoạn đó |
+| Dưới 3 chữ/số (`TV`) | Không dùng (tránh xoá hết) |
+
+Lý do không so chữ thường với link: phần lớn link VN nằm trên `vtvprime.vn`, nên `VTV` sẽ bỏ gần hết danh sách.
 
 ### Field dùng từ `streams.json`
 
@@ -78,7 +88,7 @@ Khi check chỉ gửi `url`, `referrer` (header `Referer`), `user_agent` (header
 3. Ngôn ngữ: `languages` của feed giao với danh sách ≠ rỗng.
 4. Thể loại: `categories` của channel giao với danh sách ≠ rỗng.
 5. Ô trống = không lọc; nhiều giá trị trong 1 ô = OR; giữa các ô = AND. Stream không có metadata (`channel = null`) chỉ được giữ khi cả 3 ô đều trống.
-6. Loại URL có trong `Exclude`.
+6. Loại các link khớp `Exclude` (quy tắc ở trên; chỉ tính trong phạm vi sau bước 1–5).
 7. Giữ stream có label `Geo-blocked` / `Not 24/7`, gắn nhãn hiển thị.
 8. Dedupe URL.
 9. Mỗi channel+feed giữ 1 URL: không label → quality cao hơn (`1080p`/`1080i` → 1080, `null` → 0) → thứ tự trong API.
@@ -172,7 +182,7 @@ và **lịch tự chạy**; kiểm tra hợp lệ hết rồi mới lưu, chỉ 
 - Lịch nằm trong Apps Script (trigger `autoRun` mỗi 10 phút), mặc định mỗi 3 giờ: 01:00, 04:00, …, 22:00 giờ VN; lượt chạy bắt đầu trong ~10 phút sau giờ hẹn. Đổi trên dashboard (**Cài đặt**). Không dùng cron của GitHub nữa (để đổi lịch không phải sửa file workflow).
 - Đánh đổi: lịch tự chạy cần GitHub token trong Sheet còn hạn — hết hạn thì không tự chạy (dashboard + ô Trạng thái báo lỗi).
 - Chạy tay: menu **IPTV Monitor → Chạy ngay**, nút **Chạy ngay** trên dashboard (cần mã thao tác), hoặc nút Run workflow trên GitHub.
-- Dashboard hiện trạng thái lần chạy (đang chờ / đang chạy / xong / lỗi, có link GitHub) cho mọi người; chạy ngay và đổi lịch cần mã thao tác 8 ký tự (sai 10 lần → khoá 15 phút).
+- Dashboard hiện trạng thái lần chạy (đang chờ / đang chạy / xong / lỗi — không có link GitHub, lỗi thì hướng dẫn "thử Chạy ngay lại; nếu vẫn lỗi, báo người quản lý") cho mọi người; chạy ngay và đổi lịch cần mã thao tác 8 ký tự (sai 10 lần → khoá 15 phút).
 - Sửa `Config` / `Exclude` → tự chạy sau ~1 phút.
 
 ## 8. Error handling

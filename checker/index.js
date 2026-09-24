@@ -11,7 +11,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { callBridge, fromDataTable, toDataTable, toStreamsTable } from './bridge.js';
 import { checkStream } from './check.js';
-import { API_BASE, buildList, configHash, fetchSource, normalizeConfig } from './source.js';
+import { API_BASE, applyExclude, buildList, configHash, excludeReport, excludeRules, fetchSource, normalizeConfig } from './source.js';
 import { LEVEL_LABELS, STATUS_LABELS, STATUS_ORDER, countByStatus, nextState, reasonFor } from './status.js';
 import { formatDuration, hostOf, maskUrl, runPool } from './util.js';
 
@@ -71,7 +71,7 @@ async function loadLocal(env, outDir) {
   }
   return {
     config: { countries: env.COUNTRIES, languages: env.LANGUAGES, categories: env.CATEGORIES, level: env.LEVEL },
-    exclude: String(env.EXCLUDE || '').split(/[\s,]+/).filter(Boolean),
+    exclude: String(env.EXCLUDE || '').split(/[\n;]+/).map((e) => e.trim()).filter(Boolean), // lines may hold spaces
     data: previous.data,
     lastRun: previous.lastRun || {},
   };
@@ -125,6 +125,7 @@ export async function runMonitor({ env = process.env, checkOptions = {}, io = {}
   const loaded = await load();
   const config = normalizeConfig(loaded.config);
   const exclude = new Set((loaded.exclude || []).map((u) => String(u).trim()).filter(Boolean));
+  const rules = excludeRules(exclude);
   const previousRows = fromDataTable(loaded.data);
   const previousByUrl = new Map(previousRows.map((r) => [r.url, r]));
   const lastRun = loaded.lastRun || {};
@@ -138,7 +139,7 @@ export async function runMonitor({ env = process.env, checkOptions = {}, io = {}
   let sourceCount = lastRun.sourceCount || 0;
   try {
     const source = await (io.fetchSource || fetchSource)(env.SOURCE_BASE || API_BASE);
-    list = buildList(source, config, exclude);
+    list = buildList(source, config, rules);
     if (lastRun.configHash === hash && lastRun.sourceCount > 0 && list.length < lastRun.sourceCount * SOURCE_DROP_LIMIT) {
       throw new Error(`số link giảm bất thường: ${list.length} so với ${lastRun.sourceCount} lần trước`);
     }
@@ -147,7 +148,8 @@ export async function runMonitor({ env = process.env, checkOptions = {}, io = {}
     sourceStatus = 'SOURCE_ERROR';
     sourceMessage = err.message;
     log(`SOURCE_ERROR: ${sourceMessage} → dùng lại danh sách cũ`);
-    list = previousRows.filter((r) => !exclude.has(r.url));
+    rules.forEach((r) => { r.count = 0; r.names = []; }); // count again on the old list
+    list = previousRows.filter((r) => !applyExclude(rules, { url: r.url, title: r.title, channel: r.channel }));
   }
 
   // 4. Merge with previous state; least recently checked first
@@ -193,7 +195,7 @@ export async function runMonitor({ env = process.env, checkOptions = {}, io = {}
   // 7. Save to the Sheet (failure is reported after publishing)
   let saveError = null;
   try {
-    await save({ data: toDataTable(rows), streams: toStreamsTable(rows), summary });
+    await save({ data: toDataTable(rows), streams: toStreamsTable(rows), summary, exclude: excludeReport(rules) });
   } catch (err) {
     saveError = err;
   }

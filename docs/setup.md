@@ -104,7 +104,8 @@ Nút **Chạy ngay** trên dashboard dùng được từ sau lần chạy đầu
 *⏳ Đang chờ GitHub bắt đầu chạy…* → *⏳ Đang chạy… (đã N phút)* (nền vàng) → *✓ Xong lúc …* (nền xanh) hoặc *✗ Lỗi lúc …* (nền đỏ).
 Khi đang ⏳, “Chạy ngay” (ở Sheet hay dashboard) sẽ bị từ chối — kể cả khi đang chạy theo lịch — để không tạo nhiều lần chạy chồng nhau.
 Dashboard hiện cùng trạng thái này ở thanh trên cùng.
-Ô C8 **Xem chi tiết trên GitHub** mở đúng lần chạy đó (phần **Summary** có bảng số link theo trạng thái; nếu lỗi, log ghi rõ nguyên nhân).
+Khi báo lỗi, MKT chỉ cần thử **Chạy ngay** lại; nếu vẫn lỗi thì báo người quản lý. Người quản lý xem chi tiết ở GitHub →
+tab **Actions** → **IPTV check** → lần chạy mới nhất (phần **Summary** có bảng số link theo trạng thái; nếu lỗi, log ghi rõ nguyên nhân).
 Phạm vi VN thường xong sau khoảng 2–3 phút.
 
 **C4. Bật dashboard** (chỉ làm một lần, sau khi lần chạy đầu xong vì nó tạo nhánh `gh-pages`):
@@ -125,7 +126,10 @@ Khoảng 1–2 phút sau mở <https://tienbeta.github.io/iptv_monitor/>.
 1. Google Sheet → **Chia sẻ** → thêm email MKT → quyền **Người chỉnh sửa (Editor)**.
 2. Gửi link dashboard: <https://tienbeta.github.io/iptv_monitor/>.
 3. Hướng dẫn MKT (3 dòng):
-   - Chỉ sửa **ô vàng B3–B6** trong `Config` và sheet `Exclude`. Sửa xong hệ thống **tự chạy lại sau 1–2 phút**.
+   - Chỉ sửa **ô vàng B3–B6** trong `Config` và cột A, B của sheet `Exclude`. Sửa xong hệ thống **tự chạy lại sau 1–2 phút**.
+   - Bỏ kênh không cần theo dõi: sheet `Exclude`, cột A gõ **tên kênh** (VD `An Ninh`, `VTV1`), **tên miền** (VD `vtvprime.vn`)
+     hoặc **link đầy đủ**; không cần đúng hoa thường, dấu. Sau lần chạy, cột C **Đang bỏ** ghi rõ đã bỏ kênh nào —
+     xem lại để chắc không bỏ nhầm (VD `VTV` bỏ mọi kênh VTV và VTVcab).
    - Muốn chạy ngay: menu **IPTV Monitor → Chạy ngay** (hoặc nút **Chạy ngay** trên dashboard), rồi xem ô **Trạng thái** (dòng 8). Đang ⏳ thì chưa bấm lại được — đợi ✓ Xong.
    - Các mục khác trong menu nằm ở **Quản trị** — dành cho chủ Sheet, MKT không cần bấm.
    - Sheet `Streams` tự cập nhật theo lịch; lọc/sắp xếp thoải mái, nhưng sửa tay sẽ bị ghi đè.
