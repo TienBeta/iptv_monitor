@@ -54,7 +54,9 @@ describe('Code.gs — cài đặt', () => {
     sh.getRange('A9').setValue('LẦN CHẠY GẦN NHẤT');
     sh.getRange('A10:B12').setValues([['Thời điểm', new gas.ctx.Date()], ['Nguồn dữ liệu', 'Bình thường'], ['Mức kiểm tra', '3']]);
     sh.getRange('B8').setValue('✓ Xong lúc 10:02');
+    sh.getRange('C8').setValue('Xem chi tiết trên GitHub');
     gas.ctx.setup();
+    assert.equal(sh.getRange('C8').getValue(), ''); // old GitHub link removed
     assert.deepEqual(sh.getRange('A7:A10').getValues().map((r) => r[0]), ['Lịch tự chạy', 'Trạng thái', 'Thông báo', 'LẦN CHẠY GẦN NHẤT']);
     assert.match(sh.getRange('B7').getValue(), /^Mỗi 3 giờ/);
     assert.equal(sh.getRange('B8').getValue(), '✓ Xong lúc 10:02'); // status kept
@@ -225,11 +227,12 @@ describe('Code.gs — ô "Trạng thái" và khoá nút Chạy ngay', () => {
     assert.equal(gas.sheet('Config').getRange('A8').getValue(), 'Trạng thái');
     assert.equal(progress(gas), 'Sẵn sàng');
   });
-  test('sau khi gửi: "⏳ Đang chờ" (nền vàng), có link Actions, 1 trigger theo dõi', () => {
+  test('sau khi gửi: "⏳ Đang chờ" (nền vàng), không có link GitHub, 1 trigger theo dõi', () => {
     const gas = started();
     assert.equal(progress(gas), '⏳ Đang chờ GitHub bắt đầu chạy…');
     assert.equal(color(gas), '#fff4cc');
-    assert.equal(link(gas), 'https://github.com/TienBeta/iptv_monitor/actions/workflows/check.yml');
+    assert.equal(link(gas), undefined);
+    assert.equal(gas.sheet('Config').getRange('C8').getValue(), '');
     assert.equal(watchers(gas), 1);
   });
   test('bấm lại ngay khi GitHub chưa kịp hiện lần chạy → bị chặn, không gửi thêm', () => {
@@ -264,12 +267,12 @@ describe('Code.gs — ô "Trạng thái" và khoá nút Chạy ngay', () => {
     assert.equal(posts(gas), 1);
     assert.equal(gas.sheet('Config').getRange('B9').getValue(), 'Cấu hình đã đổi — sẽ chạy lại ngay sau lần chạy hiện tại.');
   });
-  test('đang chạy → "Đang chạy… (bắt đầu hh:mm, đã N phút)", link tới lần chạy', () => {
+  test('đang chạy → "Đang chạy… (bắt đầu hh:mm, đã N phút)"', () => {
     const gas = started();
     gas.setRuns([run({ status: 'in_progress', run_started_at: new Date(Date.now() - 2 * 60000).toISOString() })]);
     gas.ctx.watchRun();
     assert.match(progress(gas), /^⏳ Đang chạy… \(bắt đầu \d\d:\d\d, đã 2 phút\)$/);
-    assert.equal(link(gas), 'https://github.com/TienBeta/iptv_monitor/actions/runs/1');
+    assert.equal(link(gas), undefined);
     assert.equal(watchers(gas), 1);
   });
   test('xong → "✓ Xong lúc …", dừng theo dõi', () => {
@@ -281,13 +284,13 @@ describe('Code.gs — ô "Trạng thái" và khoá nút Chạy ngay', () => {
     assert.equal(watchers(gas), 0);
     assert.equal(gas.props.has('RUN_WATCH'), false);
   });
-  test('lỗi → "✗ Lỗi lúc …" kèm link xem nguyên nhân, dừng theo dõi', () => {
+  test('lỗi → "✗ Lỗi lúc … thử Chạy ngay lại; nếu vẫn lỗi, báo người quản lý", dừng theo dõi', () => {
     const gas = started();
     gas.setRuns([run({ status: 'completed', conclusion: 'failure', updated_at: new Date().toISOString() })]);
     gas.ctx.watchRun();
-    assert.match(progress(gas), /^✗ Lỗi lúc/);
+    assert.match(progress(gas), /^✗ Lỗi lúc \d\d:\d\d — thử Chạy ngay lại; nếu vẫn lỗi, báo người quản lý$/);
     assert.equal(color(gas), '#f8d4d4');
-    assert.equal(link(gas), 'https://github.com/TienBeta/iptv_monitor/actions/runs/1');
+    assert.equal(link(gas), undefined);
     assert.equal(watchers(gas), 0);
   });
   test('chỉ có lần chạy cũ (trước khi bấm) → bỏ qua, tiếp tục chờ', () => {

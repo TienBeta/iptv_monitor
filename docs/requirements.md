@@ -58,7 +58,7 @@ GitHub Pages (dashboard tiếng Việt, đọc results.json)
 | Thể loại | `news, sports` | ID category của iptv-org |
 | Mức kiểm tra | `3` | Dropdown `1` / `2` / `3` / `4a` / `4b` — áp dụng chung cho mọi stream |
 
-Bên dưới (script tự ghi): dòng 7 **Lịch tự chạy** (đổi trên dashboard), dòng 8 **Trạng thái** lần chạy (+ link GitHub),
+Bên dưới (script tự ghi): dòng 7 **Lịch tự chạy** (đổi trên dashboard), dòng 8 **Trạng thái** lần chạy,
 dòng 9 **Thông báo**, từ dòng 10 khối **Lần chạy gần nhất**. Menu: *Chạy ngay* cho mọi người; các mục cài đặt / token / mã thao tác
 nằm trong menu con *Quản trị (chủ Sheet)*.
 
@@ -172,7 +172,7 @@ và **lịch tự chạy**; kiểm tra hợp lệ hết rồi mới lưu, chỉ 
 - Lịch nằm trong Apps Script (trigger `autoRun` mỗi 10 phút), mặc định mỗi 3 giờ: 01:00, 04:00, …, 22:00 giờ VN; lượt chạy bắt đầu trong ~10 phút sau giờ hẹn. Đổi trên dashboard (**Cài đặt**). Không dùng cron của GitHub nữa (để đổi lịch không phải sửa file workflow).
 - Đánh đổi: lịch tự chạy cần GitHub token trong Sheet còn hạn — hết hạn thì không tự chạy (dashboard + ô Trạng thái báo lỗi).
 - Chạy tay: menu **IPTV Monitor → Chạy ngay**, nút **Chạy ngay** trên dashboard (cần mã thao tác), hoặc nút Run workflow trên GitHub.
-- Dashboard hiện trạng thái lần chạy (đang chờ / đang chạy / xong / lỗi, có link GitHub) cho mọi người; chạy ngay và đổi lịch cần mã thao tác 8 ký tự (sai 10 lần → khoá 15 phút).
+- Dashboard hiện trạng thái lần chạy (đang chờ / đang chạy / xong / lỗi — không có link GitHub, lỗi thì hướng dẫn "thử Chạy ngay lại; nếu vẫn lỗi, báo người quản lý") cho mọi người; chạy ngay và đổi lịch cần mã thao tác 8 ký tự (sai 10 lần → khoá 15 phút).
 - Sửa `Config` / `Exclude` → tự chạy sau ~1 phút.
 
 ## 8. Error handling

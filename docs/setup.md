@@ -104,7 +104,8 @@ Nút **Chạy ngay** trên dashboard dùng được từ sau lần chạy đầu
 *⏳ Đang chờ GitHub bắt đầu chạy…* → *⏳ Đang chạy… (đã N phút)* (nền vàng) → *✓ Xong lúc …* (nền xanh) hoặc *✗ Lỗi lúc …* (nền đỏ).
 Khi đang ⏳, “Chạy ngay” (ở Sheet hay dashboard) sẽ bị từ chối — kể cả khi đang chạy theo lịch — để không tạo nhiều lần chạy chồng nhau.
 Dashboard hiện cùng trạng thái này ở thanh trên cùng.
-Ô C8 **Xem chi tiết trên GitHub** mở đúng lần chạy đó (phần **Summary** có bảng số link theo trạng thái; nếu lỗi, log ghi rõ nguyên nhân).
+Khi báo lỗi, MKT chỉ cần thử **Chạy ngay** lại; nếu vẫn lỗi thì báo người quản lý. Người quản lý xem chi tiết ở GitHub →
+tab **Actions** → **IPTV check** → lần chạy mới nhất (phần **Summary** có bảng số link theo trạng thái; nếu lỗi, log ghi rõ nguyên nhân).
 Phạm vi VN thường xong sau khoảng 2–3 phút.
 
 **C4. Bật dashboard** (chỉ làm một lần, sau khi lần chạy đầu xong vì nó tạo nhánh `gh-pages`):
