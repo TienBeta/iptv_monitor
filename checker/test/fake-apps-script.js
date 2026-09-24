@@ -175,8 +175,8 @@ export function loadAppsScript(file = new URL('../../apps-script/Code.gs', impor
             if (sandbox.__htmlDialogFails) throw new Error('Không mở được hộp thoại');
             dialogs.push({ title, html: out.html });
           },
-          prompt: (title) => {
-            dialogs.push({ prompt: title });
+          prompt: (title, text) => {
+            dialogs.push({ prompt: title, text });
             const answer = sandbox.__prompt || { button: 'CANCEL', text: '' };
             return { getSelectedButton: () => answer.button, getResponseText: () => answer.text };
           },

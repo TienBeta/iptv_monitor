@@ -489,7 +489,7 @@ describe('Code.gs — dashboard (trạng thái, Chạy ngay, mã thao tác)', ()
     gas.props.delete('DASHBOARD_CODE');
     const res = gas.post({ action: 'run', code: 'X' });
     assert.equal(res.error, 'no_code');
-    assert.match(res.message, /Quản trị → Xem mã thao tác dashboard/);
+    assert.match(res.message, /Quản trị → Đặt \/ đổi mã thao tác dashboard/);
   });
   test('lần chạy xong → trạng thái dashboard có phase, giờ bắt đầu / xong, link', () => {
     const { gas, code } = withCode();
@@ -524,22 +524,26 @@ describe('Code.gs — dashboard (trạng thái, Chạy ngay, mã thao tác)', ()
     gas.get({ action: 'status' });
     assert.equal(gas.triggers.filter((t) => t.handler === 'autoRun').length, 1);
   });
-  test('menu Xem mã thao tác: hộp thông báo có mã dạng ABCD-EFGH + link dashboard', () => {
+  test('menu Đặt / đổi mã: hộp nhập hiện mã hiện tại + link dashboard; bấm Huỷ → không đổi', () => {
     const { gas, code } = withCode();
     gas.withUi();
-    gas.ctx.showDashboardCode();
-    assert.equal(gas.dialogs.at(-1).title, 'Mã thao tác dashboard');
-    assert.ok(gas.dialogs.at(-1).alert.startsWith(`Mã: ${code}\n`));
-    assert.ok(gas.dialogs.at(-1).alert.includes('https://tienbeta.github.io/iptv_monitor/'));
+    gas.ctx.__prompt = { button: 'CANCEL', text: '' };
+    gas.ctx.setDashboardCode();
+    const shown = gas.dialogs.at(-1);
+    assert.equal(shown.prompt, 'Mã thao tác dashboard');
+    assert.ok(shown.text.startsWith(`Mã hiện tại: ${code}\n`));
+    assert.ok(shown.text.includes('https://tienbeta.github.io/iptv_monitor/'));
+    assert.equal(gas.props.get('DASHBOARD_CODE'), code);
   });
-  test('Sheet chưa có mã (chưa chạy Cài đặt ban đầu) → Xem mã tạo mã mới và hiện ra', () => {
+  test('Sheet chưa có mã (chưa chạy Cài đặt ban đầu) → mở menu là có mã mới, hiện luôn trong hộp', () => {
     const { gas } = withCode();
     gas.props.delete('DASHBOARD_CODE');
     gas.withUi();
-    gas.ctx.showDashboardCode();
+    gas.ctx.__prompt = { button: 'CANCEL', text: '' };
+    gas.ctx.setDashboardCode();
     const code = gas.props.get('DASHBOARD_CODE');
     assert.match(code, /^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/);
-    assert.ok(gas.dialogs.at(-1).alert.startsWith(`Mã: ${code}`));
+    assert.ok(gas.dialogs.at(-1).text.startsWith(`Mã hiện tại: ${code}`));
   });
   test('Xem bridge token: hộp HTML không mở được → vẫn hiện token bằng hộp thông báo', () => {
     const { gas, code } = withCode();
@@ -561,6 +565,7 @@ describe('Code.gs — dashboard (trạng thái, Chạy ngay, mã thao tác)', ()
       const { gas, code } = withCode();
       setCode(gas, { button: 'OK', text: '  Vulcan 2026 ' });
       assert.equal(gas.props.get('DASHBOARD_CODE'), 'VULCAN 2026');
+      assert.equal(gas.dialogs.at(-1).title, 'Đã đổi mã thao tác dashboard');
       assert.ok(gas.dialogs.at(-1).alert.startsWith('Mã: VULCAN 2026\n'));
       assert.equal(gas.post({ action: 'run', code }).error, 'bad_code');
       assert.equal(gas.post({ action: 'run', code: 'vulcan-2026' }).ok, true);
@@ -579,14 +584,12 @@ describe('Code.gs — dashboard (trạng thái, Chạy ngay, mã thao tác)', ()
         assert.equal(gas.props.get('DASHBOARD_CODE'), code, text);
       }
     });
-    test('để trống → tạo mã ngẫu nhiên mới; bấm Huỷ → không đổi', () => {
+    test('bấm Huỷ (kể cả đã gõ) hoặc để trống bấm OK → giữ mã hiện tại', () => {
       const { gas, code } = withCode();
       setCode(gas, { button: 'CANCEL', text: 'ABCDEF123' });
       assert.equal(gas.props.get('DASHBOARD_CODE'), code);
-      setCode(gas, { button: 'OK', text: '' });
-      const fresh = gas.props.get('DASHBOARD_CODE');
-      assert.notEqual(fresh, code);
-      assert.match(fresh, /^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/);
+      setCode(gas, { button: 'OK', text: '   ' });
+      assert.equal(gas.props.get('DASHBOARD_CODE'), code);
     });
     test('đặt mã mới xoá bộ đếm nhập sai', () => {
       const { gas } = withCode();

@@ -72,7 +72,6 @@ function onOpen() {
       .addItem('Nhập GitHub token', 'setGithubToken')
       .addItem('Xem bridge token', 'showBridgeToken')
       .addSeparator()
-      .addItem('Xem mã thao tác dashboard', 'showDashboardCode')
       .addItem('Đặt / đổi mã thao tác dashboard', 'setDashboardCode'))
     .addToUi();
 }
@@ -155,27 +154,21 @@ function tokenCode_(token) {
 }
 
 // The operator code lets the dashboard start a run and change the schedule.
-function showDashboardCode() {
-  const code = PropertiesService.getScriptProperties().getProperty('DASHBOARD_CODE') || saveNewCode_();
-  showCodeDialog_(code);
-}
-
-// The owner picks a code that is easy to share (e.g. VULCAN-2026), or leaves it
-// empty for a random one. The code stays until it is set again here.
+// One menu item for it: the prompt shows the current code; typing a new one
+// (e.g. VULCAN-2026) replaces it, empty / Huỷ keeps it. It never changes by itself.
 function setDashboardCode() {
   const ui = SpreadsheetApp.getUi();
-  const res = ui.prompt('Đặt mã thao tác dashboard',
-    'Nhập mã mới: 6–32 chữ không dấu hoặc số, có thể thêm dấu gạch / khoảng trắng (được bỏ qua, ' +
-    'không phân biệt hoa thường). Tránh mã dễ đoán như 123456.\n' +
-    'Để trống rồi bấm OK = tạo mã ngẫu nhiên.\n\n' +
-    'Mã cũ hết hiệu lực ngay; ai đã lưu mã cũ trên dashboard sẽ phải nhập mã mới.',
+  const current = PropertiesService.getScriptProperties().getProperty('DASHBOARD_CODE') || saveNewCode_();
+  const res = ui.prompt('Mã thao tác dashboard',
+    'Mã hiện tại: ' + current + '\n' +
+    'Dùng trên dashboard khi bấm "Chạy ngay" hoặc "Lịch chạy" (' + DASHBOARD_URL + '). Chỉ xem kết quả thì không cần mã.\n\n' +
+    'Đổi mã: nhập mã mới rồi bấm OK — 6–32 chữ không dấu hoặc số, có thể thêm dấu gạch / khoảng trắng ' +
+    '(không phân biệt hoa thường; tránh mã dễ đoán như 123456). Mã cũ hết hiệu lực ngay.\n' +
+    'Giữ mã hiện tại: để trống hoặc bấm Huỷ.',
     ui.ButtonSet.OK_CANCEL);
   if (res.getSelectedButton() !== ui.Button.OK) return;
   const typed = res.getResponseText().trim();
-  if (!typed) {
-    showCodeDialog_(saveNewCode_());
-    return;
-  }
+  if (!typed) return;
   const problem = codeProblem_(typed);
   if (problem) {
     ui.alert(problem + '\n\nMã cũ vẫn giữ nguyên.');
@@ -201,7 +194,7 @@ function showCodeDialog_(code) {
     Logger.log(code); // run from the editor: no UI
     return;
   }
-  ui.alert('Mã thao tác dashboard',
+  ui.alert('Đã đổi mã thao tác dashboard',
     'Mã: ' + code + '\n\n' +
     'Dùng trên dashboard khi bấm "Chạy ngay" hoặc "Lịch chạy" (dashboard hỏi mã ở lần bấm đầu). ' +
     'Chỉ xem kết quả thì không cần mã.\n\n' +
@@ -245,7 +238,7 @@ function checkCode_(given) {
   const props = PropertiesService.getScriptProperties();
   const code = props.getProperty('DASHBOARD_CODE');
   if (!code) {
-    return { error: 'no_code', message: 'Sheet chưa có mã thao tác — chủ Sheet mở menu IPTV Monitor → Quản trị → Xem mã thao tác dashboard.' };
+    return { error: 'no_code', message: 'Sheet chưa có mã thao tác — chủ Sheet mở menu IPTV Monitor → Quản trị → Đặt / đổi mã thao tác dashboard.' };
   }
   const now = Date.now();
   let fails = JSON.parse(props.getProperty('CODE_FAILS') || 'null');
