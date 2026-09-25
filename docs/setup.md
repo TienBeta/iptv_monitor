@@ -96,9 +96,10 @@ Cấu hình (phạm vi, mức kiểm tra, danh sách bỏ qua, lịch) nằm tro
 Nút **Chạy ngay** và **Cài đặt** trên dashboard dùng được từ sau lần chạy đầu tiên này.)
 
 **C3. Theo dõi.** Ngay trong sheet `Config`, dòng 4 **Trạng thái** tự cập nhật mỗi phút:
-*⏳ Đang chờ GitHub bắt đầu chạy…* → *⏳ Đang chạy… (đã N phút)* (nền vàng) → *✓ Xong lúc …* (nền xanh) hoặc *✗ Lỗi lúc …* (nền đỏ).
+*⏳ Đang chờ GitHub bắt đầu chạy…* → *⏳ Đang chạy… (đã N phút với M link)* (nền vàng) → *✓ Xong lúc …* (nền xanh) hoặc *✗ Lỗi lúc …* (nền đỏ).
 Khi đang ⏳, “Chạy ngay” (ở Sheet hay dashboard) sẽ bị từ chối — kể cả khi đang chạy theo lịch — để không tạo nhiều lần chạy chồng nhau.
-Dashboard hiện cùng trạng thái này ở thanh trên cùng.
+Dashboard hiện cùng trạng thái này ở thanh trên cùng (*Đang chạy kiểm tra · bắt đầu 14:05 · đã chạy 2 phút với 84 link*;
+số link hiện sau khoảng nửa phút, khi checker đã có danh sách).
 Khi báo lỗi, MKT chỉ cần thử **Chạy ngay** lại; nếu vẫn lỗi thì báo người quản lý. Người quản lý xem chi tiết ở GitHub →
 tab **Actions** → **IPTV check** → lần chạy mới nhất (phần **Summary** có bảng số link theo trạng thái; nếu lỗi, log ghi rõ nguyên nhân).
 Phạm vi VN thường xong sau khoảng 2–3 phút.

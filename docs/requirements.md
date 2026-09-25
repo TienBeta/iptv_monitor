@@ -161,7 +161,7 @@ Khi check chỉ gửi `url`, `referrer` (header `Referer`), `user_agent` (header
 ### Sheet `_data` (ẩn, cho logic)
 
 URL, Channel, Feed, Title, Country, Quality, Labels, Referrer, User Agent, Status, Error, HTTP Code,
-Response ms, Fail Streak, Last Checked, Last Online, First Seen.
+Response ms, Fail Streak, Last Checked, Last Online, First Seen, Categories (để dashboard vẫn có thể loại khi nguồn lỗi).
 
 ### Sheet `Config` — khối "Lần chạy gần nhất"
 
@@ -171,15 +171,19 @@ Gọn 5 dòng (chi tiết xem dashboard): Thời điểm · Nguồn dữ liệu 
 ### Dashboard (tiếng Việt)
 
 4 thẻ tổng hợp: Tổng số link / Hoạt động / Cảnh báo (Chậm + Đang lỗi) / Không hoạt động — bấm
-thẻ để lọc; thời điểm cập nhật + nút làm mới; cảnh báo nguồn; bảng Tên kênh / Quốc gia /
+thẻ để lọc; thời điểm cập nhật + nút làm mới; cảnh báo nguồn; bảng Tên kênh / Quốc gia / Thể loại /
 Trạng thái + Lý do / Kiểm tra lúc / Link (nút copy); tìm kiếm; lọc theo trạng thái (kể cả nhóm
-Cảnh báo và Khác = không kiểm tra được / chờ) và quốc gia; nút Xoá bộ lọc; sắp xếp; nhãn
+Cảnh báo và Khác = không kiểm tra được / chờ), quốc gia và thể loại; nút Xoá bộ lọc; sắp xếp; nhãn
 "Giới hạn quốc gia" / "Không phát 24/7"; giờ Việt Nam; màn hình đang tải / không có kết quả /
 lỗi tải (có nút Thử lại); nền sáng, dùng được trên máy tính, tablet, điện thoại.
 Thêm: lọc theo **Lý do**; thẻ *Không hoạt động* ghi số link *bị chặn truy cập* (HTTP 403, thường do máy kiểm tra ở Mỹ);
 cột **Hoạt động lần cuối** (thay *Kiểm tra lúc* vì mọi link được kiểm tra cùng lúc); **So với lần chạy trước**:
 *mới lỗi* (đang hoạt động → lỗi), *hoạt động lại*, *link mới*, số link bị bỏ khỏi danh sách (bấm để lọc) và ▲▼ trên thẻ
 (chỉ tính các link có ở cả hai lần chạy).
+Cột + bộ lọc **Thể loại**: thể loại của kênh theo iptv-org, tên tiếng Việt (*Tin tức*, *Tổng hợp*…); một kênh có thể có
+nhiều thể loại (đếm ở mỗi thể loại); kênh iptv-org chưa gắn thể loại (khá nhiều kênh VN, kể cả VTV1) → *—*, lọc bằng
+*Chưa phân loại*. Thanh trạng thái lần chạy ghi số link: *đang chạy · đã chạy 5 phút với 84 link* (checker báo Apps Script
+bằng action `progress` ngay khi có danh sách), *đã chạy xong · chạy 3 phút với 84 link*.
 Nút **Cài đặt**: toàn bộ cấu hình (mục 3) — bộ chọn quốc gia / ngôn ngữ / thể loại có tìm kiếm và số link, ước tính số link
 của phạm vi (cảnh báo khi > 3.000), mức kiểm tra, lịch, danh sách bỏ qua có xem trước *"Sẽ bỏ N link: …"*; tóm tắt thay đổi
 trước khi lưu. Lưu cần mã thao tác; lưu phạm vi / mức / danh sách bỏ qua → tự chạy lại sau ~1–2 phút.

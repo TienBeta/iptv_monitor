@@ -111,6 +111,7 @@ describe('toàn bộ luồng qua Google Sheet (giả lập)', () => {
     assert.ok(!('referrer' in data.streams[0]));
     assert.deepEqual(data.streams.find((x) => x.title === 'VTV2').labels, ['Geo-blocked']);
     assert.equal(data.controlUrl, web.url); // dashboard "Chạy ngay" / trạng thái
+    assert.equal(JSON.parse(gas.props.get('RUN_LINKS')).links, 5); // "đã chạy N phút với 5 link"
     // first run: nothing to compare with
     assert.equal(data.previousAt, null);
     assert.ok(data.streams.every((x) => !('prev' in x)));
@@ -119,6 +120,8 @@ describe('toàn bộ luồng qua Google Sheet (giả lập)', () => {
     assert.equal(vtv2.lastOnline, 0);
     assert.ok(data.streams.find((x) => x.title === 'VTV1').lastOnline > 0);
     assert.ok(!('blocked' in data.streams.find((x) => x.title === 'VTV1')));
+    assert.deepEqual(data.streams.find((x) => x.title === 'VTV1').categories, ['general']); // cột "Thể loại"
+    assert.deepEqual(data.categoryNames, { general: 'Tổng hợp' });
     const options = JSON.parse(readFileSync(path.join(outDir, 'options.json'), 'utf8'));
     assert.deepEqual(options.countries.map((c) => [c.code, c.n]), [['VN', 5], ['TH', 1]]);
     assert.equal(options.links.length, 7 - 1); // duplicate URL removed
@@ -150,6 +153,8 @@ describe('toàn bộ luồng qua Google Sheet (giả lập)', () => {
     assert.equal(byTitle('VTV3')[4], 'Không hoạt động'); // checked again from the old list
     assert.match(config('B9'), /^Lỗi nguồn, đang dùng danh sách cũ/);
     assert.equal(results().sourceStatus, 'SOURCE_ERROR');
+    assert.deepEqual(results().streams.find((x) => x.title === 'VTV1').categories, ['general']); // kept in _data
+    assert.deepEqual(results().categoryNames, { general: 'Tổng hợp' });
     assert.equal(existsSync(path.join(outDir, 'options.json')), false); // the publish step keeps the last one
   });
   test('API trả rỗng → SOURCE_ERROR, không xoá dữ liệu', async () => {

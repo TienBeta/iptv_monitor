@@ -207,6 +207,7 @@ export function buildList(source, config, exclude = new Set()) {
       ...countryInfo(country, countries),
       quality: s.quality || '',
       labels: Array.isArray(s.labels) ? s.labels : [],
+      categories: (s.channel && channels.get(s.channel)?.categories) || [],
       referrer: s.referrer || '',
       userAgent: s.user_agent || '',
     };
@@ -231,6 +232,9 @@ const CATEGORY_NAMES = {
   business: 'Kinh doanh', family: 'Gia đình', travel: 'Du lịch', cooking: 'Nấu ăn', public: 'Công cộng',
   auto: 'Ô tô, xe', science: 'Khoa học', weather: 'Thời tiết', relax: 'Thư giãn', interactive: 'Tương tác',
 };
+// Vietnamese name of a category ID; `apiNames` (id → English name) covers IDs added later.
+export const categoryName = (id, apiNames = new Map()) => CATEGORY_NAMES[id] || apiNames.get(id) || id;
+
 const VI_LANGUAGES = new Intl.DisplayNames(['vi'], { type: 'language' });
 
 function languageName(code, apiNames) {
@@ -266,7 +270,7 @@ export function buildOptions(source) {
     const feed = feeds.get(`${s.channel}@${s.feed}`);
     const c = s.country ? add('countries', s.country, () => ({ code: s.country, name: s.countryName, flag: s.flag })) : -1;
     const l = (feed?.languages || []).map((code) => add('languages', code, () => ({ code, name: languageName(code, langNames) })));
-    const k = (channel?.categories || []).map((id) => add('categories', id, () => ({ id, name: CATEGORY_NAMES[id] || catNames.get(id) || id })));
+    const k = s.categories.map((id) => add('categories', id, () => ({ id, name: categoryName(id, catNames) })));
     const row = [c, l, k, s.title, s.channel, channel?.name || '', hostOf(s.url) || ''];
     if (channel?.alt_names?.length) row.push(channel.alt_names);
     return row;

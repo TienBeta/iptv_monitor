@@ -10,8 +10,9 @@ export const tokenCode = (token) => createHash('sha256').update(String(token)).d
 export const DATA_COLUMNS = [
   'url', 'channel', 'feed', 'title', 'country', 'countryName', 'flag', 'quality', 'labels',
   'referrer', 'userAgent', 'status', 'error', 'httpCode', 'responseMs', 'failStreak',
-  'lastChecked', 'lastOnline', 'firstSeen',
+  'lastChecked', 'lastOnline', 'firstSeen', 'categories',
 ];
+const LIST_COLUMNS = new Set(['labels', 'categories']); // stored as "a, b"
 const NUMBER_COLUMNS = new Set(['httpCode', 'responseMs', 'failStreak', 'lastChecked', 'lastOnline', 'firstSeen']);
 
 export const STREAMS_HEADER = ['Tên kênh', 'Kênh', 'Quốc gia', 'Link', 'Trạng thái', 'Lý do', 'Kiểm tra lúc'];
@@ -56,7 +57,7 @@ export function toDataTable(rows) {
     header: DATA_COLUMNS,
     rows: rows.map((r) => DATA_COLUMNS.map((c) => {
       const v = r[c];
-      if (c === 'labels') return (v || []).join(', ');
+      if (LIST_COLUMNS.has(c)) return (v || []).join(', ');
       return v ?? '';
     })),
   };
@@ -69,7 +70,7 @@ export function fromDataTable(table) {
     const obj = {};
     for (const c of DATA_COLUMNS) {
       const v = index.has(c) ? row[index.get(c)] : '';
-      if (c === 'labels') obj.labels = String(v ?? '').split(',').map((s) => s.trim()).filter(Boolean);
+      if (LIST_COLUMNS.has(c)) obj[c] = String(v ?? '').split(',').map((s) => s.trim()).filter(Boolean);
       else if (NUMBER_COLUMNS.has(c)) obj[c] = v === '' || v === null || v === undefined ? '' : Number(v) || 0;
       else obj[c] = String(v ?? '');
     }

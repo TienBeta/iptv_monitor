@@ -25,6 +25,7 @@
   const LABEL_NAMES = { 'Geo-blocked': 'Giới hạn quốc gia', 'Not 24/7': 'Không phát 24/7' };
   const PAGE = 200;
   const NO_COUNTRY = 'NONE';
+  const NO_CATEGORY = 'none'; // category IDs are lower-case
   const STATUS_FILTERS = ['ALL', 'ONLINE', 'WARNING', 'SLOW', 'FAILING', 'OFFLINE', 'OTHER'];
   // Changes since the previous run, from each row's `prev` (present only when
   // the status changed; '' = new in the list). Only working ↔ failing counts.
@@ -48,7 +49,7 @@
   });
   const numFmt = new Intl.NumberFormat('vi-VN');
 
-  const state = { data: null, q: '', status: 'ALL', country: 'ALL', reason: 'ALL', change: 'ALL', sort: 'status', dir: 1, shown: PAGE, loading: false };
+  const state = { data: null, q: '', status: 'ALL', country: 'ALL', category: 'ALL', reason: 'ALL', change: 'ALL', sort: 'status', dir: 1, shown: PAGE, loading: false };
   const SVG_NS = 'http://www.w3.org/2000/svg';
   const COPY_ICON = 'M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z';
 
@@ -105,19 +106,21 @@
     return row.status === state.status;
   }
 
-  const filtersActive = () => state.status !== 'ALL' || state.country !== 'ALL' || state.reason !== 'ALL'
-    || state.change !== 'ALL' || state.q.trim() !== '';
+  const filtersActive = () => state.status !== 'ALL' || state.country !== 'ALL' || state.category !== 'ALL'
+    || state.reason !== 'ALL' || state.change !== 'ALL' || state.q.trim() !== '';
 
   function clearFilters() {
     state.q = '';
     state.status = 'ALL';
     state.country = 'ALL';
+    state.category = 'ALL';
     state.reason = 'ALL';
     state.change = 'ALL';
     state.shown = PAGE;
     $('q').value = '';
     $('status').value = 'ALL';
     $('country').value = 'ALL';
+    $('category').value = 'ALL';
     $('reason').value = 'ALL';
     render();
   }
@@ -139,11 +142,22 @@
     return row.country === state.country;
   }
 
+  // Thể loại: a channel can have several ("Tổng hợp, Tin tức"); IDs → names from results.json.
+  const categoriesOf = (r) => r.categories || [];
+  const categoryLabel = (id) => (state.data && state.data.categoryNames && state.data.categoryNames[id]) || id;
+  const categoryText = (r) => categoriesOf(r).map(categoryLabel).join(', ');
+  function matchesCategory(row) {
+    if (state.category === 'ALL') return true;
+    if (state.category === NO_CATEGORY) return !categoriesOf(row).length;
+    return categoriesOf(row).includes(state.category);
+  }
+
   function filtered() {
     const q = state.q.trim().toLowerCase();
     const rows = state.data.streams.filter((r) =>
       matchesStatus(r) &&
       matchesCountry(r) &&
+      matchesCategory(r) &&
       matchesReason(r) &&
       matchesChange(r) &&
       (!q || r.title.toLowerCase().includes(q) || r.channel.toLowerCase().includes(q) || r.url.toLowerCase().includes(q)));
@@ -153,6 +167,7 @@
       let d;
       if (key === 'status') d = (STATUS[a.status]?.rank ?? 9) - (STATUS[b.status]?.rank ?? 9);
       else if (key === 'lastOnline') d = (a.lastOnline || 0) - (b.lastOnline || 0);
+      else if (key === 'category') d = collator.compare(categoryText(a), categoryText(b));
       else d = collator.compare(a[key] || '', b[key] || '');
       return d * dir || collator.compare(a.title, b.title);
     });
@@ -317,6 +332,24 @@
     if (!known) state.country = 'ALL';
     country.value = state.country;
 
+    // A link counts once in each of its categories.
+    const categories = new Map();
+    let uncategorized = 0;
+    for (const r of data.streams) {
+      if (!categoriesOf(r).length) uncategorized++;
+      for (const id of categoriesOf(r)) categories.set(id, (categories.get(id) || 0) + 1);
+    }
+    const category = $('category');
+    category.replaceChildren(new Option(`Tất cả thể loại (${numFmt.format(data.streams.length)})`, 'ALL'), ...[...categories.entries()]
+      .map(([id, n]) => ({ id, n, name: categoryLabel(id) }))
+      .sort((a, b) => collator.compare(a.name, b.name))
+      .map((c) => new Option(`${c.name} (${numFmt.format(c.n)})`, c.id)));
+    const showNone = uncategorized > 0 && categories.size > 0; // no categories at all: nothing to tell apart
+    if (showNone) category.append(new Option(`Chưa phân loại (${numFmt.format(uncategorized)})`, NO_CATEGORY));
+    const knownCategory = state.category === 'ALL' || categories.has(state.category) || (state.category === NO_CATEGORY && showNone);
+    if (!knownCategory) state.category = 'ALL';
+    category.value = state.category;
+
     // Reasons of the links that are not working, most common first.
     const reasons = new Map();
     for (const r of data.streams) if (r.reason) reasons.set(r.reason, (reasons.get(r.reason) || 0) + 1);
@@ -334,6 +367,7 @@
   function readHash() {
     const p = new URLSearchParams(location.hash.slice(1));
     state.country = (p.get('country') || 'ALL').toUpperCase();
+    state.category = (p.get('category') || '').toLowerCase() || 'ALL';
     const status = (p.get('status') || 'ALL').toUpperCase();
     state.status = STATUS_FILTERS.includes(status) ? status : 'ALL';
     state.q = p.get('q') || '';
@@ -346,6 +380,7 @@
   function writeHash() {
     const p = new URLSearchParams();
     if (state.country !== 'ALL') p.set('country', state.country);
+    if (state.category !== 'ALL') p.set('category', state.category);
     if (state.status !== 'ALL') p.set('status', state.status);
     if (state.reason !== 'ALL') p.set('reason', state.reason);
     if (state.change !== 'ALL') p.set('change', state.change);
@@ -396,6 +431,9 @@
     const country = el('td', 'c-country', [r.flag, r.countryName].filter(Boolean).join(' ') || '—');
     country.dataset.label = 'Quốc gia';
 
+    const category = el('td', 'c-category', categoryText(r) || '—');
+    category.dataset.label = 'Thể loại';
+
     const status = el('td', 'c-status');
     status.dataset.label = 'Trạng thái';
     status.append(pill(r.status));
@@ -426,7 +464,7 @@
     box.append(url, btn);
     link.append(box);
 
-    tr.append(name, country, status, time, link);
+    tr.append(name, country, category, status, time, link);
     return tr;
   }
 
@@ -448,7 +486,7 @@
   function skeletonRows(n) {
     return Array.from({ length: n }, () => {
       const tr = el('tr', 'is-loading');
-      for (let i = 0; i < 5; i++) {
+      for (let i = 0; i < 6; i++) {
         const td = el('td');
         td.append(el('span', `skeleton skeleton-cell${i === 0 ? ' wide' : ''}`));
         tr.append(td);
@@ -461,7 +499,7 @@
   // disabled until there is data to filter (render() needs state.data).
   function showView(view) {
     const ready = view === 'table' || view === 'empty';
-    for (const id of ['q', 'status', 'country', 'reason']) $(id).disabled = !ready;
+    for (const id of ['q', 'status', 'country', 'category', 'reason']) $(id).disabled = !ready;
     $('rows').closest('.table-card').dataset.view = view;
     $('rows').closest('.table-scroll').hidden = view === 'error';
     $('empty').hidden = view !== 'empty';
@@ -568,11 +606,20 @@
     return min < 1 ? 'dưới 1 phút' : `${min} phút`;
   }
 
+  // " với 84 link": reported by the checker once its list is built (run.links);
+  // after the run, the published results of that run also say it.
+  function linksText(r) {
+    let n = r.links;
+    const d = state.data;
+    if (n === undefined && r.finishedAt && d && d.startedAt >= r.startedAt && d.startedAt <= r.finishedAt) n = d.total;
+    return typeof n === 'number' ? ` với ${numFmt.format(n)} link` : '';
+  }
+
   const RUN_VIEW = {
     idle: { tone: 'neutral', title: 'Sẵn sàng', detail: () => '' },
     queued: { busy: true, title: 'Đang chờ chạy', detail: (r) => (r.since ? `gửi yêu cầu lúc ${when(r.since)}` : '') },
-    running: { busy: true, title: 'Đang chạy kiểm tra', detail: (r) => (r.startedAt ? `bắt đầu ${when(r.startedAt)} · đã chạy ${minutesText(serverNow() - r.startedAt)}` : '') },
-    success: { tone: 'ok', title: 'Đã chạy xong', detail: (r) => (r.finishedAt ? `lúc ${when(r.finishedAt)}${r.startedAt ? ` · chạy ${minutesText(r.finishedAt - r.startedAt)}` : ''}` : '') },
+    running: { busy: true, title: 'Đang chạy kiểm tra', detail: (r) => (r.startedAt ? `bắt đầu ${when(r.startedAt)} · đã chạy ${minutesText(serverNow() - r.startedAt)}${linksText(r)}` : '') },
+    success: { tone: 'ok', title: 'Đã chạy xong', detail: (r) => (r.finishedAt ? `lúc ${when(r.finishedAt)}${r.startedAt ? ` · chạy ${minutesText(r.finishedAt - r.startedAt)}${linksText(r)}` : ''}` : '') },
     failure: { tone: 'err', title: 'Lần chạy bị lỗi', detail: (r) => `${r.finishedAt ? `lúc ${when(r.finishedAt)} · ` : ''}thử Chạy ngay lại; nếu vẫn lỗi, báo người quản lý` },
     cancelled: { tone: 'neutral', title: 'Lần chạy bị huỷ', detail: (r) => (r.finishedAt ? `lúc ${when(r.finishedAt)}` : '') },
     error: { tone: 'err', title: 'Có lỗi', detail: (r) => `${r.message ? `${r.message} · ` : ''}báo người quản lý hệ thống` },
@@ -590,7 +637,10 @@
 
   function setupControl(data) {
     const url = CONTROL_URL_RE.test(data.controlUrl || '') ? data.controlUrl : null;
-    if (url === ctl.url) return;
+    if (url === ctl.url) {
+      renderRunbar(); // new results can fill in the link count of the finished run
+      return;
+    }
     ctl.url = url;
     $('runbar').hidden = !url;
     if (url) fetchStatus();
@@ -1217,6 +1267,7 @@
   $('q').addEventListener('input', (e) => { state.q = e.target.value; state.shown = PAGE; render(); });
   $('status').addEventListener('change', (e) => { state.status = e.target.value; state.shown = PAGE; render(); });
   $('country').addEventListener('change', (e) => { state.country = e.target.value; state.shown = PAGE; render(); });
+  $('category').addEventListener('change', (e) => { state.category = e.target.value; state.shown = PAGE; render(); });
   $('reason').addEventListener('change', (e) => { state.reason = e.target.value; state.shown = PAGE; render(); });
   $('more').addEventListener('click', () => { state.shown += PAGE; render(); });
   $('clear').addEventListener('click', clearFilters);

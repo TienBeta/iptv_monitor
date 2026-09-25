@@ -5,8 +5,9 @@
  *
  * - Cấu hình (phạm vi, mức kiểm tra, danh sách bỏ qua, lịch) nằm trong Script
  *   Properties và chỉ sửa trên dashboard; sheet Config chỉ để xem.
- * - Web app (doPost): GitHub Actions đọc cấu hình + trạng thái cũ ("load")
- *   và ghi kết quả ("save"). Mọi request phải có đúng BRIDGE_TOKEN.
+ * - Web app (doPost): GitHub Actions đọc cấu hình + trạng thái cũ ("load"),
+ *   báo số link sẽ kiểm tra ("progress") và ghi kết quả ("save"). Mọi request
+ *   phải có đúng BRIDGE_TOKEN.
  * - Menu IPTV Monitor → Chạy ngay (hoặc nút trên dashboard): gọi GitHub API
  *   để chạy workflow ngay.
  * - Lịch tự chạy: trigger autoRun (mỗi 10 phút) chạy workflow đúng các giờ đã hẹn.
@@ -576,7 +577,9 @@ function showRun_(run) {
   if (run.status !== 'completed') {
     if (run.status === 'in_progress') {
       const minutes = Math.max(0, Math.round((Date.now() - started.getTime()) / 60000));
-      setProgress_('⏳ Đang chạy… (bắt đầu ' + hhmm_(started) + ', đã ' + minutes + ' phút)', run.html_url, 'busy',
+      const links = runLinks_({ startedAt: started.getTime() });
+      setProgress_('⏳ Đang chạy… (bắt đầu ' + hhmm_(started) + ', đã ' + minutes + ' phút' +
+        (links === null ? '' : ' với ' + links + ' link') + ')', run.html_url, 'busy',
         { phase: 'running', startedAt: started.getTime() });
     } else {
       setProgress_('⏳ Đang chờ GitHub bắt đầu chạy…', run.html_url, 'busy', { phase: 'queued', since: started.getTime() });
@@ -635,6 +638,24 @@ function setProgress_(text, url, tone, state) {
   if (!sh) return;
   sh.getRange(PROGRESS_ROW, 1, 1, 2).setValues([['Trạng thái', text]]);
   sh.getRange(PROGRESS_ROW, 2).setBackground(STATE_COLORS[tone] || STATE_COLORS.idle).setFontWeight('bold');
+}
+
+// The checker reports how many links it checks once its list is built ("progress").
+// Kept apart from RUN_STATE, which watchRun rewrites every minute.
+function handleProgress_(req) {
+  const links = Math.max(0, Math.floor(Number(req.links) || 0));
+  PropertiesService.getScriptProperties().setProperty('RUN_LINKS', JSON.stringify({ links: links, at: Date.now() }));
+  return { ok: true };
+}
+
+// Link count of `run` (RUN_STATE shape), or null when the checker has not
+// reported it during that run (reported before it started = an earlier run).
+function runLinks_(run) {
+  const raw = PropertiesService.getScriptProperties().getProperty('RUN_LINKS');
+  if (!raw || !run || !run.startedAt) return null;
+  const r = JSON.parse(raw);
+  if (r.at < run.startedAt || (run.finishedAt && r.at > run.finishedAt)) return null;
+  return r.links;
 }
 
 function hhmm_(date) {
@@ -753,10 +774,13 @@ function statusPayload_() {
   const props = PropertiesService.getScriptProperties();
   const s = readSchedule_();
   const now = Date.now();
+  const run = JSON.parse(props.getProperty('RUN_STATE') || '{"phase":"idle"}');
+  const links = runLinks_(run);
+  if (links !== null) run.links = links;
   return {
     ok: true,
     now: now,
-    run: JSON.parse(props.getProperty('RUN_STATE') || '{"phase":"idle"}'),
+    run: run,
     schedule: {
       enabled: s.enabled,
       everyHours: s.everyHours,
@@ -1035,6 +1059,7 @@ function doPost(e) {
         ', nhưng nhận được ' + (given ? 'token mã ' + tokenCode_(given) + ' dài ' + given.length + ' ký tự' : 'token rỗng') });
     }
     if (req.action === 'load') return json_(handleLoad_());
+    if (req.action === 'progress') return json_(handleProgress_(req));
     if (req.action === 'save') {
       const lock = LockService.getScriptLock();
       lock.waitLock(30000);

@@ -334,6 +334,24 @@ describe('Code.gs — ô "Trạng thái" và khoá nút Chạy ngay', () => {
     assert.equal(link(gas), undefined);
     assert.equal(watchers(gas), 1);
   });
+  test('checker báo số link ("progress", cần bridge token) → "đã N phút với M link"; dashboard nhận run.links của đúng lần chạy', () => {
+    const gas = started();
+    const token = gas.props.get('BRIDGE_TOKEN');
+    const startedAt = Date.now() - 2 * 60000;
+    gas.setRuns([run({ status: 'in_progress', run_started_at: new Date(startedAt).toISOString() })]);
+    assert.match(gas.post({ action: 'progress', links: 84 }).error, /^unauthorized/);
+    assert.deepEqual(gas.post({ token, action: 'progress', links: 84 }), { ok: true });
+    gas.ctx.watchRun();
+    assert.match(progress(gas), /^⏳ Đang chạy… \(bắt đầu \d\d:\d\d, đã 2 phút với 84 link\)$/);
+    assert.equal(gas.get({ action: 'status' }).run.links, 84);
+    gas.setRuns([run({ status: 'completed', conclusion: 'success', run_started_at: new Date(startedAt).toISOString(), updated_at: new Date().toISOString() })]);
+    gas.ctx.watchRun();
+    const done = gas.get({ action: 'status' }).run;
+    assert.deepEqual([done.phase, done.links], ['success', 84]);
+    // the next run has not reported yet: no count from the previous one
+    gas.props.set('RUN_STATE', JSON.stringify({ phase: 'running', startedAt: Date.now() + 1000 }));
+    assert.equal('links' in gas.get({ action: 'status' }).run, false);
+  });
   test('xong → "✓ Xong lúc …", dừng theo dõi', () => {
     const gas = started();
     gas.setRuns([run({ status: 'completed', conclusion: 'success', updated_at: new Date().toISOString() })]);

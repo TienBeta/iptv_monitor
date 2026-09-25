@@ -22,7 +22,7 @@ GitHub Pages — https://tienbeta.github.io/iptv_monitor/ ──────┘
 | Đường dẫn | Nội dung |
 |---|---|
 | `checker/` | Node.js, không thư viện ngoài: tải API (`source.js`), kiểm tra stream mức 1–4b (`check.js`, `http.js`), trạng thái (`status.js`), cầu nối Sheet (`bridge.js`), luồng chính (`index.js`) |
-| `apps-script/Code.gs` | Dán vào Google Sheet: web app `load`/`save` (cho Actions) và `status`/`run`/`schedule` (cho dashboard), lịch tự chạy, menu “Chạy ngay”, tự chạy lại khi sửa cấu hình |
+| `apps-script/Code.gs` | Dán vào Google Sheet: web app `load`/`progress`/`save` (cho Actions) và `status`/`run`/`schedule` (cho dashboard), lịch tự chạy, menu “Chạy ngay”, tự chạy lại khi sửa cấu hình |
 | `site/` | Dashboard tĩnh (HTML/CSS/JS thuần); `match.js` = quy tắc “bỏ qua”, dùng chung với checker |
 | `.github/workflows/check.yml` | Kiểm tra stream khi Apps Script gọi (theo lịch / Chạy ngay) hoặc chạy tay; đăng dashboard |
 | `.github/workflows/test.yml` | Chạy `npm test` khi có code mới |
