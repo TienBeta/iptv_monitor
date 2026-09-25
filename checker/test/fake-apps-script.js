@@ -25,7 +25,11 @@ class FakeProtection {
 
 class FakeFilter {
   constructor(sheet, range) { this.sheet = sheet; this.range = range; this.criteria = {}; }
-  getColumnFilterCriteria(c) { return this.criteria[c] || null; }
+  getRange() { return this.range; }
+  getColumnFilterCriteria(c) {
+    if (c < this.range.col || c > this.range.getLastColumn()) throw new Error(`cột ${c} nằm ngoài vùng lọc`); // Code.gs must only ask inside the filter
+    return this.criteria[c] || null;
+  }
   setColumnFilterCriteria(c, cr) { this.criteria[c] = cr; return this; }
   remove() { this.sheet.filter = null; }
 }
@@ -77,15 +81,16 @@ class FakeRange {
 
 class FakeSheet {
   constructor(name, ctx) {
-    Object.assign(this, { name, ctx, cells: [], maxRows: 1000, maxCols: 26, hidden: false, filter: null, protections: [], formats: [], links: {}, backgrounds: {} });
+    Object.assign(this, { name, ctx, cells: [], maxRows: 1000, maxCols: 26, hidden: false, filter: null, protections: [], formats: [], links: {}, backgrounds: {}, plainText: new Set() });
   }
   getName() { return this.name; }
   get(r, c) { const v = this.cells[r - 1]?.[c - 1]; return v === undefined ? '' : v; }
   set(r, c, v) {
     if (r < 1 || c < 1 || r > this.maxRows || c > this.maxCols) throw new Error(`${this.name}: ô (${r},${c}) nằm ngoài sheet ${this.maxRows}x${this.maxCols}`);
     // Sheets stores a leading apostrophe as "plain text" and hides it.
-    const value = typeof v === 'string' && v.startsWith("'") ? v.slice(1) : v;
-    (this.cells[r - 1] ||= [])[c - 1] = value;
+    const quoted = typeof v === 'string' && v.startsWith("'");
+    if (quoted) this.plainText.add(`${r},${c}`); else this.plainText.delete(`${r},${c}`); // test helper
+    (this.cells[r - 1] ||= [])[c - 1] = quoted ? v.slice(1) : v;
   }
   clear(r, c) { if (this.cells[r - 1]) this.cells[r - 1][c - 1] = ''; }
   getRange(a, b, c, d) {
@@ -123,8 +128,10 @@ class FakeSheet {
   getProtections(type) { return this.protections.filter((p) => !type || p.type === type); }
   protect() { const p = new FakeProtection('SHEET', this); this.protections.push(p); return p; }
   hideSheet() { this.hidden = true; return this; }
-  setFrozenRows() { return this; }
-  setColumnWidth() { return this; }
+  setFrozenRows(n) { this.frozenRows = n; return this; }
+  setFrozenColumns(n) { this.frozenColumns = n; return this; }
+  setColumnWidth(c, w) { (this.widths ||= {})[c] = w; return this; }
+  setRowHeights(start, n, h) { this.rowHeights = { start, n, h }; return this; }
   setConditionalFormatRules(rules) { this.cfRules = rules; return this; }
   // test helper: values as plain rows
   rows() { return this.getDataRange().getValues(); }

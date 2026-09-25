@@ -22,7 +22,7 @@ GitHub Pages (dashboard tiếng Việt, đọc results.json)
 | # | Yêu cầu |
 |---|---|
 | FR1 | Mỗi lần chạy, Actions đọc config + trạng thái cũ từ Google Sheet qua Apps Script web app (có token). |
-| FR2 | Tải `streams.json`, `channels.json`, `feeds.json`, `countries.json` từ `https://iptv-org.github.io/api/`. |
+| FR2 | Tải `streams.json`, `channels.json`, `feeds.json`, `countries.json` từ `https://iptv-org.github.io/api/`; thêm (không bắt buộc, lỗi thì cột tương ứng để trống) `languages`, `categories`, `logos`, `guides`, `regions`, `subdivisions`, `cities` cho tên tiếng Việt và các cột chi tiết của sheet `Streams`. |
 | FR3 | Lọc theo config (mục 4). |
 | FR4 | Dedupe URL; mỗi channel+feed giữ đúng 1 URL tốt nhất. |
 | FR5 | Dựng danh sách mới từ API, chép trạng thái cũ theo key `url`; stream không còn trong API → xoá. |
@@ -156,12 +156,35 @@ Khi check chỉ gửi `url`, `referrer` (header `Referer`), `user_agent` (header
 
 ### Sheet `Streams` (MKT xem, script ghi đè mỗi lần chạy)
 
-`Tên kênh | Kênh | Quốc gia | Link | Trạng thái | Lý do | Kiểm tra lúc`
+22 cột (tên kênh, logo, link, kết quả kiểm tra, rồi thông tin kênh MKT cần):
+
+| Cột | Lấy từ iptv-org | Ghi chú |
+|---|---|---|
+| Tên kênh · Mã kênh | `streams.title` · `streams.channel` | cột A được cố định khi cuộn ngang |
+| Logo | `logos.json` | hiện ảnh (`IMAGE()`); ưu tiên logo của đúng feed → của kênh, đang dùng, PNG/JPEG/GIF/WebP (Sheets không hiện SVG), lớn nhất |
+| Link | `streams.url` | |
+| Trạng thái · Lý do · Kiểm tra lúc | kết quả kiểm tra | giữ vị trí cột E–G như bản cũ |
+| Thể loại | `channels.categories` | tên tiếng Việt |
+| Quốc gia | `channels.country` | cờ + tên tiếng Việt |
+| Khu vực | `regions.json` | vùng địa lý nhỏ nhất chứa quốc gia (VN → *Đông Nam Á*); bỏ các nhóm chính trị/kinh tế (ASEAN, EU, Toàn cầu…) |
+| Tỉnh/bang · Thành phố | `feeds.broadcast_area` (`s/…`, `ct/…`) + `subdivisions`, `cities` | vùng phát sóng của feed; kênh VN hiện chỉ ghi phát sóng toàn quốc nên trống |
+| Ngôn ngữ | `feeds.languages` | tên tiếng Việt |
+| Độ phân giải | `streams.quality` | VD 1080p |
+| Định dạng video | `feeds.format` | VD 576i, 1080i |
+| Network · Chủ sở hữu · Website | `channels.network` · `owners` · `website` | |
+| Ngày ra mắt · Ngày đóng | `channels.launched` · `closed` | ô ngày dd/MM/yyyy; kênh đã đóng bị loại khỏi danh sách (mục 4) nên *Ngày đóng* luôn trống |
+| Lịch phát sóng | `guides.json` | các trang có lịch phát sóng (EPG) của feed, không thì của kênh |
+| Link logo | `logos.json` | URL của logo, để copy |
+
+Bộ lọc MKT đặt trên sheet đi theo **tên cột** khi đổi bố cục. Chữ Sheets dễ hiểu nhầm thành ngày/số (*24/7*, *2019-01-01*)
+được ghi dạng chữ.
 
 ### Sheet `_data` (ẩn, cho logic)
 
 URL, Channel, Feed, Title, Country, Quality, Labels, Referrer, User Agent, Status, Error, HTTP Code,
-Response ms, Fail Streak, Last Checked, Last Online, First Seen, Categories (để dashboard vẫn có thể loại khi nguồn lỗi).
+Response ms, Fail Streak, Last Checked, Last Online, First Seen, Categories và các cột chi tiết của `Streams` (logo, khu vực,
+tỉnh/bang, thành phố, ngôn ngữ, định dạng, network, chủ sở hữu, website, ngày ra mắt / đóng, lịch phát sóng) — để khi nguồn lỗi
+vẫn có đủ thông tin.
 
 ### Sheet `Config` — khối "Lần chạy gần nhất"
 

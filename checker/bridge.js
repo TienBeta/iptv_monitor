@@ -2,6 +2,7 @@
 // between stream objects and the 2-D tables the Sheet stores.
 
 import { createHash } from 'node:crypto';
+import { categoryName } from './source.js';
 import { STATUS_LABELS, reasonFor } from './status.js';
 
 // Same fingerprint as tokenCode_() in Code.gs: first 3 bytes of SHA-256, upper-case hex.
@@ -11,12 +12,46 @@ export const DATA_COLUMNS = [
   'url', 'channel', 'feed', 'title', 'country', 'countryName', 'flag', 'quality', 'labels',
   'referrer', 'userAgent', 'status', 'error', 'httpCode', 'responseMs', 'failStreak',
   'lastChecked', 'lastOnline', 'firstSeen', 'categories',
+  // details for the Sheet "Streams" (details.js), kept so a source failure still has them
+  'logo', 'region', 'subdivision', 'city', 'languageNames', 'format', 'network', 'owners', 'website', 'launched', 'closed', 'guide',
 ];
 const LIST_COLUMNS = new Set(['labels', 'categories']); // stored as "a, b"
 const NUMBER_COLUMNS = new Set(['httpCode', 'responseMs', 'failStreak', 'lastChecked', 'lastOnline', 'firstSeen']);
 
-export const STREAMS_HEADER = ['Tên kênh', 'Kênh', 'Quốc gia', 'Link', 'Trạng thái', 'Lý do', 'Kiểm tra lúc'];
-export const STREAMS_DATE_COLUMN = 6; // "Kiểm tra lúc": epoch ms, written as a date cell
+// Sheet "Streams" for MKT: name, logo, link, the check result, then the channel details.
+// Keep in step with STREAMS_HEADER in Code.gs (used when the Sheet is set up).
+export const STREAMS_COLUMNS = [
+  ['Tên kênh', (r) => r.title],
+  ['Mã kênh', (r) => r.channel],
+  ['Logo', (r) => r.logo], // shown as the image
+  ['Link', (r) => r.url],
+  ['Trạng thái', (r) => STATUS_LABELS[r.status] || r.status],
+  ['Lý do', (r) => reasonFor(r.status, r.error)],
+  ['Kiểm tra lúc', (r) => r.lastChecked || ''],
+  ['Thể loại', (r, o) => (r.categories || []).map((id) => categoryName(id, o.categoryNames)).join(', ')],
+  ['Quốc gia', (r) => [r.flag, r.countryName].filter(Boolean).join(' ')],
+  ['Khu vực', (r) => r.region],
+  ['Tỉnh/bang', (r) => r.subdivision],
+  ['Thành phố', (r) => r.city],
+  ['Ngôn ngữ', (r) => r.languageNames],
+  ['Độ phân giải', (r) => r.quality],
+  ['Định dạng video', (r) => r.format],
+  ['Network', (r) => r.network],
+  ['Chủ sở hữu', (r) => r.owners],
+  ['Website', (r) => r.website],
+  ['Ngày ra mắt', (r) => r.launched],
+  ['Ngày đóng', (r) => r.closed],
+  ['Lịch phát sóng', (r) => r.guide],
+  ['Link logo', (r) => r.logo],
+];
+export const STREAMS_HEADER = STREAMS_COLUMNS.map(([h]) => h);
+const at = (name) => STREAMS_HEADER.indexOf(name);
+export const STREAMS_DATE_COLUMN = at('Kiểm tra lúc'); // epoch ms, written as a date cell
+// Date cells and their format (Code.gs); launch / close dates are "YYYY-MM-DD".
+export const STREAMS_DATE_COLUMNS = {
+  [STREAMS_DATE_COLUMN]: 'dd/MM/yyyy HH:mm', [at('Ngày ra mắt')]: 'dd/MM/yyyy', [at('Ngày đóng')]: 'dd/MM/yyyy',
+};
+export const STREAMS_IMAGE_COLUMN = at('Logo');
 
 export async function callBridge(url, token, action, payload = {}, timeoutMs = 5 * 60_000) {
   let res;
@@ -80,20 +115,16 @@ export function fromDataTable(table) {
 
 const collator = new Intl.Collator('vi');
 
-export function toStreamsTable(rows) {
+/** `categoryNames`: category ID → Vietnamese name (as in results.json). */
+export function toStreamsTable(rows, { categoryNames = {} } = {}) {
   const sorted = [...rows].sort((a, b) =>
     collator.compare(a.countryName || '~', b.countryName || '~') || collator.compare(a.title, b.title));
+  const opts = { categoryNames: new Map(Object.entries(categoryNames)) };
   return {
     header: STREAMS_HEADER,
-    dateColumn: STREAMS_DATE_COLUMN,
-    rows: sorted.map((r) => [
-      r.title,
-      r.channel,
-      [r.flag, r.countryName].filter(Boolean).join(' '),
-      r.url,
-      STATUS_LABELS[r.status] || r.status,
-      reasonFor(r.status, r.error),
-      r.lastChecked || '',
-    ]),
+    dateColumn: STREAMS_DATE_COLUMN, // read by Code.gs versions before dateColumns
+    dateColumns: STREAMS_DATE_COLUMNS,
+    imageColumn: STREAMS_IMAGE_COLUMN,
+    rows: sorted.map((r) => STREAMS_COLUMNS.map(([, value]) => value(r, opts) ?? '')),
   };
 }

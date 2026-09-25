@@ -11,6 +11,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { callBridge, fromDataTable, toDataTable, toStreamsTable } from './bridge.js';
 import { checkStream } from './check.js';
+import { addDetails } from './details.js';
 import {
   API_BASE, applyExclude, buildList, buildOptions, categoryName, configHash, excludeReport, excludeRules, fetchSource, normalizeConfig,
 } from './source.js';
@@ -148,7 +149,7 @@ export async function runMonitor({ env = process.env, checkOptions = {}, io = {}
     apiCategoryNames = new Map((source.categories || []).map((c) => [c.id, c.name]));
     // Dashboard settings catalog; only written when the source loaded (the publish step keeps the last one).
     await writeFile(path.join(outDir, 'options.json'), JSON.stringify({ generatedAt: Date.now(), ...buildOptions(source) }));
-    list = buildList(source, config, rules);
+    list = addDetails(source, buildList(source, config, rules));
     if (lastRun.configHash === hash && lastRun.sourceCount > 0 && list.length < lastRun.sourceCount * SOURCE_DROP_LIMIT) {
       throw new Error(`số link giảm bất thường: ${list.length} so với ${lastRun.sourceCount} lần trước`);
     }
@@ -205,11 +206,15 @@ export async function runMonitor({ env = process.env, checkOptions = {}, io = {}
     ],
   };
 
+  // Vietnamese names of the category IDs in the rows (Sheet "Thể loại", dashboard column + filter).
+  const categoryNames = Object.fromEntries([...new Set(rows.flatMap((r) => r.categories || []))]
+    .map((id) => [id, categoryName(id, apiCategoryNames)]));
+
   // 7. Save to the Sheet (failure is reported after publishing)
   await reported;
   let saveError = null;
   try {
-    await save({ data: toDataTable(rows), streams: toStreamsTable(rows), summary, exclude: excludeReport(rules) });
+    await save({ data: toDataTable(rows), streams: toStreamsTable(rows, { categoryNames }), summary, exclude: excludeReport(rules) });
   } catch (err) {
     saveError = err;
   }
@@ -237,9 +242,7 @@ export async function runMonitor({ env = process.env, checkOptions = {}, io = {}
     // schedule. Knowing the URL is not enough to read the Sheet (load/save need the
     // bridge token; run/schedule need the operator code).
     ...(bridgeUrl ? { controlUrl: bridgeUrl.trim() } : {}),
-    // Vietnamese names of the category IDs in `streams[].categories` (column + filter "Thể loại").
-    categoryNames: Object.fromEntries([...new Set(rows.flatMap((r) => r.categories || []))]
-      .map((id) => [id, categoryName(id, apiCategoryNames)])),
+    categoryNames, // names of the IDs in streams[].categories
     streams: rows.map((r) => ({
       title: r.title,
       channel: r.channel,

@@ -109,7 +109,9 @@ Phạm vi VN thường xong sau khoảng 2–3 phút.
 Khoảng 1–2 phút sau mở <https://tienbeta.github.io/iptv_monitor/>.
 
 **C5. Kiểm tra.**
-- Sheet `Streams` có danh sách kênh, cột **Trạng thái** tô màu.
+- Sheet `Streams` có danh sách kênh, cột **Trạng thái** tô màu, cùng logo, thể loại, khu vực, ngôn ngữ, độ phân giải, network,
+  chủ sở hữu, website, ngày ra mắt, lịch phát sóng… (22 cột, xem [requirements](requirements.md) mục *Sheet Streams*;
+  cột nào iptv-org không có dữ liệu thì để trống).
 - Sheet `Config`: dòng 2 **Cấu hình** (*Quốc gia: VN · … · Mức 3 - … · Bỏ qua: không*), dòng 3 **Lịch tự chạy** (*Mỗi 3 giờ (01:00, 04:00, …)*); khối **LẦN CHẠY GẦN NHẤT** có thời điểm, nguồn dữ liệu, kết quả (*84 link: 70 hoạt động · 14 không hoạt động*), thời gian chạy, link dashboard.
 - Dashboard hiện cùng số liệu.
 - Dashboard: thanh trên cùng ghi *Đã chạy xong* và *Tự chạy mỗi 3 giờ · lần tới …*.

@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { tokenCode } from '../bridge.js';
+import { DATA_COLUMNS, STREAMS_HEADER, toDataTable, toStreamsTable, tokenCode } from '../bridge.js';
 import { loadAppsScript } from './fake-apps-script.js';
 
 const isDate = (v) => Object.prototype.toString.call(v) === '[object Date]';
@@ -210,6 +210,80 @@ describe('Code.gs — web app (load / save)', () => {
     saveSettings(gas, { exclude: lines.slice(0, 2) }); // shorter: old chunks removed
     assert.equal(gas.props.get('EXCLUDE_N'), '1');
     assert.equal(gas.props.has('EXCLUDE_1'), false);
+  });
+  describe('sheet Streams bản mới (22 cột cho MKT)', () => {
+    const row = {
+      url: 'https://a/1.m3u8', channel: 'VTV1.vn', feed: 'HD', title: '24/7 VTV1', country: 'VN', countryName: 'Việt Nam', flag: '🇻🇳',
+      quality: '1080p', status: 'ONLINE', error: '', lastChecked: Date.UTC(2026, 8, 23, 3, 17), categories: ['news', 'general'],
+      logo: 'https://img.example/vtv1.png', region: 'Đông Nam Á', subdivision: '', city: '', languageNames: 'Tiếng Việt',
+      format: '1080i', network: '', owners: 'Vietnam Television', website: 'https://vtv.vn/', launched: '1970-09-07', closed: '', guide: 'vtv.vn',
+    };
+    const evil = { ...row, url: 'https://a/2.m3u8', title: 'VTV2', status: 'OFFLINE', error: 'HTTP_404', logo: 'https://x/a.png") & HYPERLINK("http://evil', launched: '2019-01-01' };
+    const payload = () => ({
+      ...savePayload(),
+      streams: toStreamsTable([row, evil], { categoryNames: { news: 'Tin tức', general: 'Tổng hợp' } }),
+    });
+    const col = (gas, name) => gas.sheet('Streams').rows()[0].indexOf(name) + 1;
+    const value = (gas, r, name) => gas.sheet('Streams').get(r, col(gas, name));
+
+    test('logo hiện bằng IMAGE(); link logo lạ (có dấu ") bị bỏ, không thành công thức', () => {
+      const { gas, token } = ready();
+      assert.equal(gas.post({ token, action: 'save', ...payload() }).ok, true);
+      const rows = gas.sheet('Streams').rows();
+      assert.deepEqual(rows[0], STREAMS_HEADER);
+      assert.equal(value(gas, 2, 'Logo'), '=IMAGE("https://img.example/vtv1.png")');
+      assert.equal(value(gas, 3, 'Logo'), '');
+      assert.equal(value(gas, 3, 'Link logo'), evil.logo); // as plain text
+      assert.equal(value(gas, 2, 'Thể loại'), 'Tin tức, Tổng hợp');
+      assert.deepEqual(gas.sheet('Streams').rowHeights, { start: 2, n: 2, h: 30 });
+    });
+    test('ngày ra mắt / kiểm tra lúc là ô ngày; chữ dễ bị Sheets hiểu nhầm ("24/7", "2019-01-01", "1080p") giữ nguyên dạng chữ', () => {
+      const { gas, token } = ready();
+      gas.post({ token, action: 'save', ...payload() });
+      const launched = value(gas, 2, 'Ngày ra mắt');
+      assert.ok(isDate(launched));
+      assert.equal(launched.toISOString(), '1970-09-07T12:00:00.000Z'); // same day in any Sheet time zone
+      assert.equal(value(gas, 2, 'Ngày đóng'), '');
+      assert.ok(isDate(value(gas, 2, 'Kiểm tra lúc')));
+      const formats = gas.sheet('Streams').formats.map((f) => [f.col, f.format]);
+      assert.deepEqual(formats.filter(([c]) => [7, 19, 20].includes(c)), [[7, 'dd/MM/yyyy HH:mm'], [19, 'dd/MM/yyyy'], [20, 'dd/MM/yyyy']]);
+      const text = gas.sheet('Streams').plainText;
+      assert.ok(text.has(`2,${col(gas, 'Tên kênh')}`) && text.has(`2,${col(gas, 'Độ phân giải')}`));
+      // _data keeps the date as text, so it reads back unchanged
+      gas.post({ token, action: 'save', ...payload(), data: toDataTable([row]) });
+      assert.equal(gas.post({ token, action: 'load' }).data.rows[0][DATA_COLUMNS.indexOf('launched')], '1970-09-07');
+    });
+    test('Sheet cũ 7 cột → cột mới, bộ lọc MKT đi theo tên cột, đặt lại độ rộng / màu trạng thái', () => {
+      const { gas, token } = ready();
+      gas.post({ token, action: 'save', ...savePayload() }); // old layout: Quốc gia = C, Trạng thái = E
+      const sh = gas.sheet('Streams');
+      sh.getFilter().setColumnFilterCriteria(3, { country: 'Việt Nam' }).setColumnFilterCriteria(5, { status: 'Không hoạt động' })
+        .setColumnFilterCriteria(2, { channel: 'x' });
+      gas.post({ token, action: 'save', ...payload() });
+      const f = sh.getFilter();
+      assert.deepEqual(f.getColumnFilterCriteria(col(gas, 'Quốc gia')), { country: 'Việt Nam' });
+      assert.deepEqual(f.getColumnFilterCriteria(col(gas, 'Trạng thái')), { status: 'Không hoạt động' });
+      assert.equal(f.getColumnFilterCriteria(col(gas, 'Mã kênh')), null); // "Kênh" is now "Mã kênh": its filter is dropped
+      assert.equal(f.range.getLastColumn(), 22);
+      assert.equal(sh.frozenColumns, 1);
+      assert.equal(sh.widths[col(gas, 'Link')], 360);
+      // MKT resizes a column: a save with the same columns keeps it
+      sh.setColumnWidth(col(gas, 'Link'), 500);
+      gas.post({ token, action: 'save', ...payload() });
+      assert.equal(sh.widths[col(gas, 'Link')], 500);
+    });
+    test('checker bản cũ (7 cột, dateColumn) vẫn ghi được', () => {
+      const { gas, token } = ready();
+      gas.post({ token, action: 'save', ...payload() });
+      assert.equal(gas.post({ token, action: 'save', ...savePayload() }).ok, true);
+      assert.equal(gas.sheet('Streams').rows()[0].length, 7);
+      assert.ok(isDate(gas.sheet('Streams').get(2, 7)));
+    });
+    test('Cài đặt ban đầu: sheet Streams mới có sẵn 22 cột', () => {
+      const { gas } = ready();
+      assert.deepEqual(gas.sheet('Streams').rows()[0], STREAMS_HEADER);
+      assert.equal(gas.sheet('Streams').getFilter().range.getLastColumn(), 22);
+    });
   });
   test('save 12,000 dòng (vượt 1,000 dòng mặc định của sheet)', () => {
     const { gas, token } = ready();

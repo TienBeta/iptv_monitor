@@ -44,7 +44,16 @@ const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 32 ký tự, bỏ I/O/
 const CODE_MAX_FAILS = 10;
 const CODE_LOCK_MS = 15 * 60 * 1000;
 const DASHBOARD_URL = 'https://' + GITHUB_REPO.split('/')[0].toLowerCase() + '.github.io/' + GITHUB_REPO.split('/')[1] + '/';
-const STREAMS_HEADER = ['Tên kênh', 'Kênh', 'Quốc gia', 'Link', 'Trạng thái', 'Lý do', 'Kiểm tra lúc'];
+// Sheet "Streams" (the checker sends the same header on every save; see checker/bridge.js)
+// and each column's width.
+const STREAMS_WIDTHS = {
+  'Tên kênh': 220, 'Mã kênh': 150, 'Logo': 90, 'Link': 360, 'Trạng thái': 140, 'Lý do': 260, 'Kiểm tra lúc': 130,
+  'Thể loại': 150, 'Quốc gia': 140, 'Khu vực': 130, 'Tỉnh/bang': 130, 'Thành phố': 130, 'Ngôn ngữ': 160,
+  'Độ phân giải': 100, 'Định dạng video': 110, 'Network': 140, 'Chủ sở hữu': 200, 'Website': 220,
+  'Ngày ra mắt': 100, 'Ngày đóng': 100, 'Lịch phát sóng': 170, 'Link logo': 300,
+};
+const STREAMS_HEADER = Object.keys(STREAMS_WIDTHS);
+const STREAMS_ROW_HEIGHT = 30; // room for the logo image
 const LEVEL_OPTIONS = [
   '1 - Link có phản hồi',
   '2 - Danh sách phát hợp lệ',
@@ -345,19 +354,31 @@ function configText_() {
 
 function setupStreamsSheet_(ss) {
   const sh = ss.getSheetByName(SHEET.streams) || ss.insertSheet(SHEET.streams);
-  sh.getRange(1, 1, 1, STREAMS_HEADER.length).setValues([STREAMS_HEADER])
-    .setFontWeight('bold').setBackground('#f1f3f4');
+  if (sh.getLastRow() <= 1) sh.getRange(1, 1, 1, STREAMS_HEADER.length).setValues([STREAMS_HEADER]);
+  const header = sh.getRange(1, 1, 1, Math.max(1, sh.getLastColumn())).getValues()[0].map(String);
+  layoutStreamsSheet_(sh, header);
+  if (!sh.getFilter()) sh.getRange(1, 1, Math.max(2, sh.getLastRow()), header.length).createFilter();
+  if (!sh.getProtections(SpreadsheetApp.ProtectionType.SHEET).length) {
+    sh.protect().setDescription('Script ghi đè mỗi lần chạy — sửa tay sẽ mất').setWarningOnly(true);
+  }
+}
+
+// Header style, column widths and status colours, found by column name. Runs at
+// setup and when a save brings different columns (e.g. after an update), so
+// widths MKT changed by hand are otherwise kept.
+function layoutStreamsSheet_(sh, header) {
+  sh.getRange(1, 1, 1, header.length).setFontWeight('bold').setBackground('#f1f3f4');
   sh.setFrozenRows(1);
-  [240, 170, 140, 420, 140, 300, 130].forEach(function (w, i) { sh.setColumnWidth(i + 1, w); });
-  const statusRange = sh.getRange('E2:E');
+  sh.setFrozenColumns(1);
+  header.forEach(function (h, i) { if (STREAMS_WIDTHS[h]) sh.setColumnWidth(i + 1, STREAMS_WIDTHS[h]); });
+  const status = header.indexOf('Trạng thái');
+  if (status < 0) return;
+  const letter = String.fromCharCode(65 + status); // the status column stays within A–Z
+  const statusRange = sh.getRange(letter + '2:' + letter); // open-ended: covers rows added later
   sh.setConditionalFormatRules(Object.keys(STATUS_COLORS).map(function (label) {
     return SpreadsheetApp.newConditionalFormatRule()
       .whenTextEqualTo(label).setBackground(STATUS_COLORS[label]).setRanges([statusRange]).build();
   }));
-  if (!sh.getFilter()) sh.getRange(1, 1, Math.max(2, sh.getLastRow()), STREAMS_HEADER.length).createFilter();
-  if (!sh.getProtections(SpreadsheetApp.ProtectionType.SHEET).length) {
-    sh.protect().setDescription('Script ghi đè mỗi lần chạy — sửa tay sẽ mất').setWarningOnly(true);
-  }
 }
 
 function setupDataSheet_(ss) {
@@ -1108,7 +1129,13 @@ function handleSave_(req) {
   const dataSheet = ss.getSheetByName(SHEET.data) || ss.insertSheet(SHEET.data);
   const streamsSheet = ss.getSheetByName(SHEET.streams) || ss.insertSheet(SHEET.streams);
   writeTable_(dataSheet, req.data.header, req.data.rows, {});
-  writeTable_(streamsSheet, req.streams.header, req.streams.rows, { dateColumn: req.streams.dateColumn, keepFilter: true });
+  writeTable_(streamsSheet, req.streams.header, req.streams.rows, {
+    dateColumns: req.streams.dateColumns || (req.streams.dateColumn === undefined ? {} : legacyDates_(req.streams.dateColumn)),
+    imageColumn: req.streams.imageColumn,
+    keepFilter: true,
+    rowHeight: req.streams.imageColumn === undefined ? 0 : STREAMS_ROW_HEIGHT,
+    onHeaderChange: layoutStreamsSheet_,
+  });
   writeSummary_(ss, req.summary);
   if (req.exclude) saveExcludeReport_(req.exclude);
   PropertiesService.getScriptProperties().setProperty('LAST_RUN', JSON.stringify({
@@ -1127,15 +1154,21 @@ function saveExcludeReport_(report) {
 }
 
 // Whole table in one setValues; keeps the MKT filter criteria on Streams.
+// opts: dateColumns {index: number format} (epoch ms or "YYYY-MM-DD"), imageColumn
+// (URL → logo image), keepFilter (MKT's filter criteria follow their column by
+// name, so they survive a change of columns), rowHeight, onHeaderChange(sh, header).
 function writeTable_(sh, header, rows, opts) {
   const width = header.length;
   const height = rows.length + 1;
+  const dates = opts.dateColumns || {};
+  const oldHeader = sh.getLastColumn() ? sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String) : [];
   const criteria = {};
   const filter = opts.keepFilter ? sh.getFilter() : null;
   if (filter) {
-    for (let c = 1; c <= width; c++) {
+    const fr = filter.getRange();
+    for (let c = fr.getColumn(); c <= fr.getLastColumn(); c++) {
       const cr = filter.getColumnFilterCriteria(c);
-      if (cr) criteria[c] = cr;
+      if (cr && oldHeader[c - 1]) criteria[oldHeader[c - 1]] = cr;
     }
     filter.remove();
   }
@@ -1143,18 +1176,29 @@ function writeTable_(sh, header, rows, opts) {
   if (sh.getMaxColumns() < width) sh.insertColumnsAfter(sh.getMaxColumns(), width - sh.getMaxColumns());
   sh.getRange(1, 1, sh.getMaxRows(), Math.max(width, sh.getLastColumn(), 1)).clearContent();
 
-  const values = [header.map(function (h) { return cell_(h, false); })].concat(rows.map(function (row) {
-    return header.map(function (_, i) { return cell_(row[i], i === opts.dateColumn); });
+  const kinds = header.map(function (_, i) { return dates[i] ? 'date' : i === opts.imageColumn ? 'image' : ''; });
+  const values = [header.map(function (h) { return cell_(h); })].concat(rows.map(function (row) {
+    return header.map(function (_, i) { return cell_(row[i], kinds[i]); });
   }));
   sh.getRange(1, 1, height, width).setValues(values);
-  if (opts.dateColumn !== undefined && rows.length) {
-    sh.getRange(2, opts.dateColumn + 1, rows.length, 1).setNumberFormat('dd/MM/yyyy HH:mm');
+  if (rows.length) {
+    Object.keys(dates).forEach(function (i) {
+      if (Number(i) < width) sh.getRange(2, Number(i) + 1, rows.length, 1).setNumberFormat(dates[i]);
+    });
+    if (opts.rowHeight) sh.setRowHeights(2, rows.length, opts.rowHeight);
   }
   if (sh.getMaxRows() > height + 1) sh.deleteRows(height + 2, sh.getMaxRows() - height - 1);
   if (opts.keepFilter) {
     const f = sh.getRange(1, 1, Math.max(height, 2), width).createFilter();
-    Object.keys(criteria).forEach(function (c) { f.setColumnFilterCriteria(Number(c), criteria[c]); });
+    header.forEach(function (h, i) { if (criteria[h]) f.setColumnFilterCriteria(i + 1, criteria[h]); });
   }
+  if (opts.onHeaderChange && oldHeader.join('\n') !== header.join('\n')) opts.onHeaderChange(sh, header);
+}
+
+function legacyDates_(index) {
+  const d = {};
+  d[index] = 'dd/MM/yyyy HH:mm';
+  return d;
 }
 
 function writeSummary_(ss, s) {
@@ -1162,18 +1206,30 @@ function writeSummary_(ss, s) {
   if (!sh) return;
   const lines = [['Thời điểm', new Date(s.runAt)]].concat(s.lines || []);
   const values = lines.map(function (l) {
-    return [cell_(l[0], false), l[1] instanceof Date ? l[1] : cell_(l[1], false)];
+    return [cell_(l[0]), l[1] instanceof Date ? l[1] : cell_(l[1])];
   });
   sh.getRange(SUMMARY_ROW, 1, 20, 2).clearContent();
   sh.getRange(SUMMARY_ROW, 1, values.length, 2).setValues(values);
   sh.getRange(SUMMARY_ROW, 2).setNumberFormat('dd/MM/yyyy HH:mm');
 }
 
-// Text that starts like a formula is stored as plain text.
-function cell_(v, isDate) {
+// kind 'date': epoch ms, or "YYYY-MM-DD" (noon UTC: the same day in any time zone
+// the Sheet uses). 'image': an http(s) logo URL shown with IMAGE(); the URL
+// can't hold quotes or spaces, so it can't break out of the formula.
+// Other text that Sheets would read as a formula, number, date or TRUE/FALSE
+// ("=…", "24/7", "2019-01-01") is stored as plain text.
+function cell_(v, kind) {
   if (v === null || v === undefined) return '';
-  if (isDate) return typeof v === 'number' && v > 0 ? new Date(v) : '';
-  if (typeof v === 'string' && /^[=+\-@]/.test(v)) return "'" + v;
+  if (kind === 'date') {
+    if (typeof v === 'number') return v > 0 ? new Date(v) : '';
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v));
+    return m ? new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12)) : '';
+  }
+  if (kind === 'image') {
+    const url = String(v);
+    return /^https?:\/\/[^\s"'\\]+$/.test(url) && url.length <= 1000 ? '=IMAGE("' + url + '")' : '';
+  }
+  if (typeof v === 'string' && /^([=+\-@\d]|(true|false)$)/i.test(v)) return "'" + v;
   return v;
 }
 

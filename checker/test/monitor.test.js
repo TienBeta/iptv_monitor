@@ -47,11 +47,18 @@ before(async () => {
       if (apiMode === 'down') return send(502, 'bad gateway')(req, res);
       const name = new URL(req.url, 'http://x').pathname.slice(1);
       const channels = ['VTV1.vn', 'VTV2.vn', 'VTV3.vn', 'HTV7.vn', 'THVL1.vn'].map((id) => channel(id, 'VN')).concat(channel('ThaiPBS.th', 'TH'));
+      Object.assign(channels[0], { network: 'VTV', owners: ['Vietnam Television'], website: 'https://vtv.vn/', launched: '1970-09-07' });
       const body = {
         'streams.json': apiMode === 'empty' ? [] : apiMode === 'shrink' ? fullList().slice(0, 1) : fullList(),
         'channels.json': channels,
-        'feeds.json': [],
+        'feeds.json': [{ channel: 'VTV1.vn', id: 'HD', broadcast_area: ['c/VN', 's/VN-HN', 'ct/VNHAN'], languages: ['vie', 'eng'], format: '1080i' }],
         'countries.json': [{ code: 'VN', name: 'Vietnam', flag: '🇻🇳' }, { code: 'TH', name: 'Thailand', flag: '🇹🇭' }],
+        // optional files: details for the Sheet "Streams"
+        'logos.json': [{ channel: 'VTV1.vn', feed: null, in_use: true, format: 'PNG', width: 400, url: 'https://img.example/vtv1.png' }],
+        'guides.json': [{ channel: 'VTV1.vn', feed: 'HD', site: 'vtv.vn', site_id: '1', site_name: 'VTV1', lang: 'vi', sources: [] }],
+        'regions.json': [{ code: 'ASIA', name: 'Asia', countries: ['VN', 'TH', 'CN', 'JP'] }, { code: 'SEA', name: 'Southeast Asia', countries: ['VN', 'TH'] }],
+        'subdivisions.json': [{ country: 'VN', code: 'VN-HN', name: 'Ha Noi', parent: null }],
+        'cities.json': [{ country: 'VN', subdivision: 'VN-HN', code: 'VNHAN', name: 'Hanoi' }],
       }[name];
       return body ? send(200, JSON.stringify(body), { 'Content-Type': 'application/json' })(req, res) : send(404, '')(req, res);
     },
@@ -80,6 +87,12 @@ const run = () => runMonitor({ env: env(), checkOptions: FAST });
 const results = () => JSON.parse(readFileSync(path.join(outDir, 'results.json'), 'utf8'));
 const streamsSheet = () => gas.sheet('Streams').rows().slice(1);
 const byTitle = (title) => streamsSheet().find((r) => r[0] === title);
+// A Streams cell by column name ("Quốc gia"), wherever the column is.
+const cell = (title, column) => {
+  const header = gas.sheet('Streams').rows()[0];
+  assert.ok(header.includes(column), `no column ${column}`);
+  return byTitle(title)[header.indexOf(column)];
+};
 const config = (a1) => gas.sheet('Config').getRange(a1).getValue();
 // Settings live in Apps Script and are changed from the dashboard ("settings" + operator code).
 const settings = (body) => {
@@ -98,7 +111,7 @@ describe('toàn bộ luồng qua Google Sheet (giả lập)', () => {
     assert.equal(byTitle('VTV1')[4], 'Hoạt động');
     assert.equal(byTitle('VTV2')[4], 'Đang lỗi'); // first failure
     assert.equal(byTitle('VTV2')[5], 'Bị chặn truy cập (có thể do giới hạn quốc gia)');
-    assert.equal(byTitle('VTV1')[2], '🇻🇳 Việt Nam');
+    assert.equal(cell('VTV1', 'Quốc gia'), '🇻🇳 Việt Nam');
     assert.equal(config('A9'), 'Nguồn dữ liệu');
     assert.equal(config('B9'), 'Bình thường');
     assert.equal(config('A10'), 'Kết quả');
@@ -126,6 +139,25 @@ describe('toàn bộ luồng qua Google Sheet (giả lập)', () => {
     assert.deepEqual(options.countries.map((c) => [c.code, c.n]), [['VN', 5], ['TH', 1]]);
     assert.equal(options.links.length, 7 - 1); // duplicate URL removed
   });
+  test('Streams có đủ cột MKT cần: logo, thể loại, khu vực, tỉnh/bang, thành phố, ngôn ngữ, độ phân giải, định dạng, network, chủ sở hữu, website, ngày ra mắt / đóng, lịch phát sóng', () => {
+    assert.deepEqual(gas.sheet('Streams').rows()[0], [
+      'Tên kênh', 'Mã kênh', 'Logo', 'Link', 'Trạng thái', 'Lý do', 'Kiểm tra lúc', 'Thể loại', 'Quốc gia', 'Khu vực',
+      'Tỉnh/bang', 'Thành phố', 'Ngôn ngữ', 'Độ phân giải', 'Định dạng video', 'Network', 'Chủ sở hữu', 'Website',
+      'Ngày ra mắt', 'Ngày đóng', 'Lịch phát sóng', 'Link logo',
+    ]);
+    const expected = {
+      'Mã kênh': 'VTV1.vn', Logo: '=IMAGE("https://img.example/vtv1.png")', 'Thể loại': 'Tổng hợp', 'Khu vực': 'Đông Nam Á',
+      'Tỉnh/bang': 'Ha Noi', 'Thành phố': 'Hanoi', 'Ngôn ngữ': 'Tiếng Việt, Tiếng Anh', 'Độ phân giải': '720p',
+      'Định dạng video': '1080i', Network: 'VTV', 'Chủ sở hữu': 'Vietnam Television', Website: 'https://vtv.vn/',
+      'Ngày đóng': '', 'Lịch phát sóng': 'vtv.vn', 'Link logo': 'https://img.example/vtv1.png',
+    };
+    for (const [column, value] of Object.entries(expected)) assert.equal(cell('VTV1', column), value, column);
+    const launched = cell('VTV1', 'Ngày ra mắt');
+    assert.ok(launched instanceof gas.ctx.Date, 'date cell');
+    assert.equal(launched.toISOString(), '1970-09-07T12:00:00.000Z');
+    assert.equal(cell('VTV2', 'Logo'), ''); // no logo in iptv-org
+    assert.equal(cell('VTV2', 'Khu vực'), 'Đông Nam Á'); // from the country
+  });
   test('lần 2: lỗi lần thứ 2 → Không hoạt động; stream vừa chết → Đang lỗi', async () => {
     streams.breakFlip();
     await run();
@@ -151,6 +183,9 @@ describe('toàn bộ luồng qua Google Sheet (giả lập)', () => {
     assert.equal(summary.sourceStatus, 'SOURCE_ERROR');
     assert.equal(summary.total, 5);
     assert.equal(byTitle('VTV3')[4], 'Không hoạt động'); // checked again from the old list
+    assert.equal(cell('VTV1', 'Network'), 'VTV'); // details kept in _data
+    assert.equal(cell('VTV1', 'Thành phố'), 'Hanoi');
+    assert.equal(cell('VTV1', 'Logo'), '=IMAGE("https://img.example/vtv1.png")');
     assert.match(config('B9'), /^Lỗi nguồn, đang dùng danh sách cũ/);
     assert.equal(results().sourceStatus, 'SOURCE_ERROR');
     assert.deepEqual(results().streams.find((x) => x.title === 'VTV1').categories, ['general']); // kept in _data
@@ -175,7 +210,7 @@ describe('toàn bộ luồng qua Google Sheet (giả lập)', () => {
     const { summary } = await run();
     assert.equal(summary.sourceStatus, 'OK');
     assert.equal(summary.total, 6);
-    assert.equal(byTitle('ThaiPBS')[2], '🇹🇭 Thái Lan');
+    assert.equal(cell('ThaiPBS', 'Quốc gia'), '🇹🇭 Thái Lan');
     assert.equal(results().streams.find((x) => x.title === 'ThaiPBS').prev, ''); // new in the list
   });
   test('thu hẹp phạm vi (chỉ TH) → hợp lệ vì cấu hình đã đổi', async () => {

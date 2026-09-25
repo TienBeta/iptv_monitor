@@ -21,18 +21,24 @@ async function fetchJson(url) {
   }
 }
 
+// Optional files: names and details for the dashboard and the Sheet "Streams";
+// one that fails to load only leaves its column empty.
+const OPTIONAL_FILES = ['languages', 'categories', 'logos', 'guides', 'regions', 'subdivisions', 'cities'];
+
 export async function fetchSource(base = API_BASE) {
-  const optional = (name) => fetchJson(`${base}/${name}.json`).catch(() => []); // names for the dashboard only
-  const [streams, channels, feeds, countries, languages, categories] = await Promise.all([
+  const optional = (name) => fetchJson(`${base}/${name}.json`).catch(() => []);
+  const [streams, channels, feeds, countries, ...extra] = await Promise.all([
     ...['streams', 'channels', 'feeds', 'countries'].map((name) => fetchJson(`${base}/${name}.json`)),
-    optional('languages'),
-    optional('categories'),
+    ...OPTIONAL_FILES.map(optional),
   ]);
   if (!Array.isArray(streams) || streams.length === 0) throw new Error('streams.json rỗng hoặc sai định dạng');
   if (!Array.isArray(channels) || channels.length === 0) throw new Error('channels.json rỗng hoặc sai định dạng');
   if (!Array.isArray(feeds)) throw new Error('feeds.json sai định dạng');
   const list = (v) => (Array.isArray(v) ? v : []);
-  return { streams, channels, feeds, countries: list(countries), languages: list(languages), categories: list(categories) };
+  return {
+    streams, channels, feeds, countries: list(countries),
+    ...Object.fromEntries(OPTIONAL_FILES.map((name, i) => [name, list(extra[i])])),
+  };
 }
 
 // ---- Config from the Sheet ----
@@ -237,7 +243,7 @@ export const categoryName = (id, apiNames = new Map()) => CATEGORY_NAMES[id] || 
 
 const VI_LANGUAGES = new Intl.DisplayNames(['vi'], { type: 'language' });
 
-function languageName(code, apiNames) {
+export function languageName(code, apiNames = new Map()) {
   let name = '';
   try {
     name = VI_LANGUAGES.of(code) || '';
