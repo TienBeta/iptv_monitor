@@ -11,7 +11,10 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { callBridge, fromDataTable, toDataTable, toStreamsTable } from './bridge.js';
 import { checkStream } from './check.js';
-import { API_BASE, applyExclude, buildList, buildOptions, configHash, excludeReport, excludeRules, fetchSource, normalizeConfig } from './source.js';
+import { addDetails } from './details.js';
+import {
+  API_BASE, applyExclude, buildList, buildOptions, categoryName, configHash, excludeReport, excludeRules, fetchSource, normalizeConfig,
+} from './source.js';
 import { LEVEL_LABELS, STATUS_LABELS, STATUS_ORDER, countByStatus, nextState, reasonFor } from './status.js';
 import { formatDuration, hostOf, maskUrl, runPool } from './util.js';
 
@@ -120,6 +123,9 @@ export async function runMonitor({ env = process.env, checkOptions = {}, io = {}
   const save = io.save || (bridgeUrl
     ? (payload) => callBridge(bridgeUrl.trim(), bridgeToken, 'save', payload)
     : (payload) => saveLocal(outDir, payload));
+  const progress = io.progress || (bridgeUrl
+    ? (links) => callBridge(bridgeUrl.trim(), bridgeToken, 'progress', { links }, 30_000)
+    : async () => {});
 
   // 1. Config + previous state
   const loaded = await load();
@@ -137,11 +143,13 @@ export async function runMonitor({ env = process.env, checkOptions = {}, io = {}
   let sourceStatus = 'OK';
   let sourceMessage = '';
   let sourceCount = lastRun.sourceCount || 0;
+  let apiCategoryNames = new Map();
   try {
     const source = await (io.fetchSource || fetchSource)(env.SOURCE_BASE || API_BASE);
+    apiCategoryNames = new Map((source.categories || []).map((c) => [c.id, c.name]));
     // Dashboard settings catalog; only written when the source loaded (the publish step keeps the last one).
     await writeFile(path.join(outDir, 'options.json'), JSON.stringify({ generatedAt: Date.now(), ...buildOptions(source) }));
-    list = buildList(source, config, rules);
+    list = addDetails(source, buildList(source, config, rules));
     if (lastRun.configHash === hash && lastRun.sourceCount > 0 && list.length < lastRun.sourceCount * SOURCE_DROP_LIMIT) {
       throw new Error(`số link giảm bất thường: ${list.length} so với ${lastRun.sourceCount} lần trước`);
     }
@@ -158,6 +166,10 @@ export async function runMonitor({ env = process.env, checkOptions = {}, io = {}
   const items = list.map((s) => ({ ...s, host: hostOf(s.url) || s.url, prev: previousByUrl.get(s.url) }));
   items.sort((a, b) => (a.prev?.lastChecked || 0) - (b.prev?.lastChecked || 0));
   log(`Nguồn: ${sourceStatus} | ${items.length} link cần kiểm tra`);
+  // For the dashboard run bar ("đã chạy 5 phút với 84 link"); runs alongside the checks, never fails the run.
+  const reported = Promise.resolve()
+    .then(() => progress(items.length))
+    .catch((err) => log(`Không báo được số link cho dashboard: ${err.message}`));
 
   // 5. Check
   const budgetMs = Number(env.BUDGET_MIN) > 0 ? Number(env.BUDGET_MIN) * 60_000 : BUDGET_MS;
@@ -194,10 +206,15 @@ export async function runMonitor({ env = process.env, checkOptions = {}, io = {}
     ],
   };
 
+  // Vietnamese names of the category IDs in the rows (Sheet "Thể loại", dashboard column + filter).
+  const categoryNames = Object.fromEntries([...new Set(rows.flatMap((r) => r.categories || []))]
+    .map((id) => [id, categoryName(id, apiCategoryNames)]));
+
   // 7. Save to the Sheet (failure is reported after publishing)
+  await reported;
   let saveError = null;
   try {
-    await save({ data: toDataTable(rows), streams: toStreamsTable(rows), summary, exclude: excludeReport(rules) });
+    await save({ data: toDataTable(rows), streams: toStreamsTable(rows, { categoryNames }), summary, exclude: excludeReport(rules) });
   } catch (err) {
     saveError = err;
   }
@@ -225,12 +242,14 @@ export async function runMonitor({ env = process.env, checkOptions = {}, io = {}
     // schedule. Knowing the URL is not enough to read the Sheet (load/save need the
     // bridge token; run/schedule need the operator code).
     ...(bridgeUrl ? { controlUrl: bridgeUrl.trim() } : {}),
+    categoryNames, // names of the IDs in streams[].categories
     streams: rows.map((r) => ({
       title: r.title,
       channel: r.channel,
       country: r.country,
       countryName: r.countryName,
       flag: r.flag,
+      categories: r.categories || [],
       url: r.url,
       status: r.status,
       reason: reasonFor(r.status, r.error),

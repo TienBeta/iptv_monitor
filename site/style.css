@@ -472,7 +472,7 @@ button.metric:hover { border-color: var(--border-strong); box-shadow: var(--shad
 .search input::placeholder, .field input::placeholder { color: var(--text-3); }
 .field input { width: 100%; padding: 0 12px; }
 .toolbar select, .field select, .field-select {
-  flex: 0 1 210px;
+  flex: 0 1 190px;
   min-width: 0;
   padding: 0 32px 0 12px;
   appearance: none;
@@ -542,9 +542,10 @@ table {
   border-spacing: 0;
   table-layout: fixed;
 }
-.col-name { width: 24%; }
-.col-country { width: 12%; }
-.col-status { width: 27%; }
+.col-name { width: 22%; }
+.col-country { width: 11%; }
+.col-category { width: 12%; }
+.col-status { width: 23%; }
 .col-time { width: 152px; }
 .col-link { width: auto; }
 
@@ -617,7 +618,7 @@ tbody tr:not(.is-loading):hover td { background: var(--surface-2); }
   line-height: 18px;
   white-space: nowrap;
 }
-.c-country { color: var(--text); font-size: 13px; overflow-wrap: anywhere; }
+.c-country, .c-category { color: var(--text); font-size: 13px; overflow-wrap: anywhere; }
 .pill {
   display: inline-flex;
   align-items: center;
@@ -723,10 +724,11 @@ tbody tr:not(.is-loading):hover td { background: var(--surface-2); }
   .wrap { padding: 16px 16px 32px; }
   .appbar-inner { padding: 0 16px; }
   .table-scroll { overflow-x: auto; }
-  table { min-width: 820px; }
+  table { min-width: 960px; }
   th { position: static; }
-  .col-name { width: 27%; }
-  .col-status { width: 20%; }
+  .col-name { width: 23%; }
+  .col-country { width: 13%; }
+  .col-status { width: 19%; }
   .col-time { width: 140px; }
 }
 
@@ -780,7 +782,7 @@ tbody tr:not(.is-loading):hover td { background: var(--surface-2); }
   tbody tr {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    grid-template-areas: "name name" "status status" "country time" "link link";
+    grid-template-areas: "name name" "status status" "country category" "time time" "link link";
     gap: 8px 12px;
     padding: 12px;
     border-bottom: 1px solid var(--divider);
@@ -792,9 +794,10 @@ tbody tr:not(.is-loading):hover td { background: var(--surface-2); }
   .c-name { grid-area: name; }
   .c-status { grid-area: status; }
   .c-country { grid-area: country; }
+  .c-category { grid-area: category; }
   .c-time { grid-area: time; white-space: normal; }
   .c-link { grid-area: link; padding: 0; }
-  .c-country::before, .c-time::before {
+  .c-country::before, .c-category::before, .c-time::before {
     content: attr(data-label);
     display: block;
     color: var(--text-3);

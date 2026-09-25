@@ -65,6 +65,7 @@
         </label>
         <select id="status" aria-label="Lọc theo trạng thái"></select>
         <select id="country" aria-label="Lọc theo quốc gia"></select>
+        <select id="category" aria-label="Lọc theo thể loại"></select>
         <select id="reason" aria-label="Lọc theo lý do lỗi"></select>
         <div class="toolbar-end">
           <button id="clear" class="text-btn" type="button" hidden>Xoá bộ lọc</button>
@@ -75,12 +76,13 @@
       <div class="table-scroll">
         <table>
           <colgroup>
-            <col class="col-name"><col class="col-country"><col class="col-status"><col class="col-time"><col class="col-link">
+            <col class="col-name"><col class="col-country"><col class="col-category"><col class="col-status"><col class="col-time"><col class="col-link">
           </colgroup>
           <thead>
             <tr>
               <th scope="col"><button type="button" data-sort="title">Tên kênh<span class="sort-ico" aria-hidden="true"></span></button></th>
               <th scope="col"><button type="button" data-sort="countryName">Quốc gia<span class="sort-ico" aria-hidden="true"></span></button></th>
+              <th scope="col"><button type="button" data-sort="category">Thể loại<span class="sort-ico" aria-hidden="true"></span></button></th>
               <th scope="col"><button type="button" data-sort="status">Trạng thái<span class="sort-ico" aria-hidden="true"></span></button></th>
               <th scope="col"><button type="button" data-sort="lastOnline" title="Lần gần nhất link còn xem được">Hoạt động lần cuối<span class="sort-ico" aria-hidden="true"></span></button></th>
               <th scope="col">Link</th>

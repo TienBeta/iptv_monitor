@@ -78,8 +78,10 @@ kiểm tra ngay sau khi làm xong [docs/setup.md](setup.md):
 |---|---|---|
 | Stream thật qua Sheet | Bước C2 với `VN`, mức 3 | Run xanh trong ~2–3 phút; khoảng 80% “Hoạt động”; khoảng 10% “Bị chặn truy cập” vì runner ở Mỹ (khớp smoke test) |
 | Apps Script thật | Mở Sheet sau lần chạy | `Streams` có dữ liệu, cột Trạng thái tô màu, “Kiểm tra lúc” đúng giờ VN |
+| Sheet `Streams` 22 cột | Mở `Streams` sau lần chạy đầu với Code.gs mới | Cột **Logo** hiện ảnh, **Ngày ra mắt** là ngày dd/MM/yyyy; bộ lọc đang đặt ở *Trạng thái* / *Quốc gia* vẫn còn; cột A cố định khi cuộn ngang |
 | Chạy ngay / tự chạy | Menu IPTV Monitor → Chạy ngay; lưu một thay đổi trong **Cài đặt** | B5 (Thông báo) báo đã gửi; tab Actions có run mới (*workflow_dispatch*) sau vài phút |
 | Chuyển cấu hình từ Sheet cũ | Sheet cũ → Quản trị → Cài đặt ban đầu | Sheet `Exclude` biến mất; `Config` dòng 2 ghi đúng quốc gia / mức / số mục bỏ qua cũ; **Cài đặt** trên dashboard hiện đúng các giá trị đó (kể cả ghi chú) |
 | Dashboard: thay đổi / lý do / hoạt động lần cuối | Mở dashboard sau lần chạy thứ 2 | Dòng *So với lần chạy trước* (bấm để lọc), mũi tên ▲▼ trên thẻ, lọc *Lý do*, cột *Hoạt động lần cuối* |
+| Dashboard: thể loại / số link khi chạy | Bấm **Chạy ngay**, xem thanh trên cùng; sau khi xong, chọn *Thể loại* | *đã chạy N phút với M link* (M = số link của phạm vi); cột *Thể loại* cạnh *Quốc gia*, lọc *Tin tức* chỉ còn kênh tin tức, *Chưa phân loại* = các dòng *—* |
 | Lịch tự chạy | Xem tab Actions sau ~6 giờ | Có run *workflow_dispatch* trong ~10 phút sau các giờ đã hẹn (mặc định 01, 04, 07, 10, 13, 16, 19, 22 giờ VN) |
 | Dashboard: Chạy ngay / Cài đặt | Bấm **Chạy ngay** → nhập mã; mở **Cài đặt** → đổi mức kiểm tra / lịch → Lưu | Thanh trên cùng: *Đang chờ chạy* → *Đang chạy kiểm tra* → *Đã chạy xong*, rồi bảng tự tải kết quả mới; lịch mới hiện “lần tới …” |

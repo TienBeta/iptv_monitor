@@ -2,7 +2,9 @@
 
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { buildList, buildOptions, configHash, countryOf, excludeReport, excludeRules, foldText, normalizeConfig, parseLevel, qualityOf, wordsOf } from '../source.js';
+import {
+  buildList, buildOptions, categoryName, configHash, countryOf, excludeReport, excludeRules, foldText, normalizeConfig, parseLevel, qualityOf, wordsOf,
+} from '../source.js';
 
 const source = {
   channels: [
@@ -162,6 +164,14 @@ describe('buildList', () => {
     assert.equal(s.country, 'VN');
     assert.equal(s.countryName, 'Việt Nam');
     assert.equal(s.flag, '🇻🇳');
+  });
+  test('mỗi link mang thể loại của kênh (cột + bộ lọc "Thể loại" trên dashboard); không có kênh → rỗng', () => {
+    const list = buildList(source, normalizeConfig({}));
+    assert.deepEqual(list.find((s) => s.channel === 'VTV1.vn').categories, ['general', 'news']);
+    assert.deepEqual(list.find((s) => s.title === 'Unknown').categories, []);
+    assert.equal(categoryName('news'), 'Tin tức');
+    assert.equal(categoryName('newcat', new Map([['newcat', 'New Cat']])), 'New Cat'); // ID added to iptv-org later
+    assert.equal(categoryName('newcat'), 'newcat');
   });
 });
 
