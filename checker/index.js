@@ -150,7 +150,7 @@ export async function runMonitor({ env = process.env, checkOptions = {}, io = {}
     sourceStatus = 'SOURCE_ERROR';
     sourceMessage = err.message;
     log(`SOURCE_ERROR: ${sourceMessage} → dùng lại danh sách cũ`);
-    rules.forEach((r) => { r.count = 0; r.names = []; }); // count again on the old list
+    rules.forEach((r) => { r.count = 0; r.names = []; r.keys = new Set(); }); // count again on the old list
     list = previousRows.filter((r) => !applyExclude(rules, { url: r.url, title: r.title, channel: r.channel }));
   }
 

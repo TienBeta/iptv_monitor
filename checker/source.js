@@ -113,12 +113,14 @@ export function excludeRules(entries) {
     const entry = String(raw ?? '').trim();
     if (!entry || seen.has(entry)) continue;
     seen.add(entry);
-    rules.push({ ...makeRule(entry), count: 0, names: [] });
+    rules.push({ ...makeRule(entry), count: 0, names: [], keys: new Set() });
   }
   return rules;
 }
 
-// True when a rule removes the stream; every matching rule counts it (for the report).
+// True when a rule removes the stream; every matching rule counts it (for the
+// report). `fields.key` (channel@feed) makes the count "rows that leave the list",
+// not candidate links: a channel with a backup link still counts once.
 export function applyExclude(rules, fields) {
   let hit = false;
   let words = null;
@@ -127,7 +129,8 @@ export function applyExclude(rules, fields) {
     if (!rule.link) words ||= nameWords(fields);
     if (!ruleMatches(rule, fields, words)) continue;
     hit = true;
-    rule.count++;
+    if (!fields.key || !rule.keys.has(fields.key)) rule.count++;
+    if (fields.key) rule.keys.add(fields.key);
     const name = matchName(fields);
     if (rule.names.length < 4 && !rule.names.includes(name)) rule.names.push(name);
   }
@@ -162,7 +165,7 @@ export function buildList(source, config, exclude = new Set()) {
     if (!s.channel) {
       // No metadata: can't be filtered or grouped, so only kept when nothing is filtered.
       if (noFilter) {
-        if (applyExclude(rules, { url, title: s.title })) {
+        if (applyExclude(rules, { url, title: s.title, key: url })) {
           excluded.add(url);
           return;
         }
@@ -180,7 +183,8 @@ export function buildList(source, config, exclude = new Set()) {
     }
     if (config.categories.length && !channel?.categories?.some((c) => config.categories.includes(c))) return;
     // Checked inside the scope, so the report counts only links the Sheet would list.
-    if (applyExclude(rules, { url, title: s.title, channel: s.channel, name: channel?.name, altNames: channel?.alt_names })) {
+    const feedKey = `${s.channel}@${s.feed ?? ''}`;
+    if (applyExclude(rules, { url, title: s.title, channel: s.channel, name: channel?.name, altNames: channel?.alt_names, key: feedKey })) {
       excluded.add(url);
       return;
     }

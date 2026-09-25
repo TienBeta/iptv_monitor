@@ -6,7 +6,7 @@ dashboard GitHub Pages. Người dùng cuối là team MKT — mọi thứ hiể
 tiếng Việt, không thuật ngữ kỹ thuật.
 
 ```text
-Google Sheet (Config, Exclude, Streams) + Apps Script (cầu nối, lịch tự chạy, menu "Chạy ngay")
+Google Sheet (Config chỉ xem, Streams) + Apps Script (cầu nối, cấu hình, lịch tự chạy, menu "Chạy ngay")
         ▲ đọc config + trạng thái cũ │ ghi kết quả
         │                            ▼
 GitHub Actions (Node.js, chạy khi Apps Script gọi: theo lịch hoặc Chạy ngay)
@@ -31,7 +31,7 @@ GitHub Pages (dashboard tiếng Việt, đọc results.json)
 | FR8 | Ghi kết quả vào Sheet theo batch (sheet `Streams` cho MKT, sheet ẩn `_data` cho logic) + khối "Lần chạy gần nhất". |
 | FR9 | Xuất `results.json` lên nhánh `gh-pages`; dashboard tiếng Việt đọc file này. Sheet giữ private. |
 | FR10 | Tự chạy theo lịch (mặc định mỗi 3h từ 01:00 giờ VN; đổi chu kỳ 1/2/3/4/6/8/12/24h + giờ bắt đầu, hoặc tắt, trên dashboard) — trigger Apps Script mỗi 10 phút gọi GitHub API; lượt nào gặp lần chạy trước chưa xong thì bỏ qua. Chạy tay bằng menu **IPTV Monitor → Chạy ngay** hoặc nút **Chạy ngay** trên dashboard. |
-| FR11 | Sửa `Config` hoặc `Exclude` → tự chạy lại sau ~1 phút (gom nhiều lần sửa thành 1 lần chạy). |
+| FR11 | Lưu phạm vi / mức kiểm tra / danh sách bỏ qua trên dashboard → tự chạy lại sau ~1 phút (nhiều lần lưu liền nhau = 1 lần chạy). |
 | FR12 | API iptv-org lỗi → giữ danh sách cũ, báo `SOURCE_ERROR`, vẫn check danh sách cũ. |
 
 ## 2. Non-functional Requirements
@@ -49,23 +49,29 @@ GitHub Pages (dashboard tiếng Việt, đọc results.json)
 
 ## 3. Input
 
-### Sheet `Config` (MKT sửa)
+### Cấu hình (sửa trên dashboard → **Cài đặt**; lưu trong Apps Script Script Properties)
 
-| Ô | Ví dụ | Quy ước |
+| Mục | Ví dụ | Quy ước |
 |---|---|---|
-| Quốc gia | `VN, TH` | Mã ISO 3166-1 alpha-2, lấy từ đuôi channel ID (`AnGiangTV1.vn` → `VN`) |
-| Ngôn ngữ | `vie` | Mã ISO 639-3, theo `languages` của feed |
-| Thể loại | `news, sports` | ID category của iptv-org |
-| Mức kiểm tra | `3` | Dropdown `1` / `2` / `3` / `4a` / `4b` — áp dụng chung cho mọi stream |
+| Quốc gia | VN, TH | Mã ISO 3166-1 alpha-2, lấy từ đuôi channel ID (`AnGiangTV1.vn` → `VN`); trống = tất cả |
+| Ngôn ngữ | vie | Mã ISO 639-3, theo `languages` của feed; trống = không lọc |
+| Thể loại | news, sports | ID category của iptv-org; trống = không lọc |
+| Mức kiểm tra | 3 | `1` / `2` / `3` / `4a` / `4b` — áp dụng chung cho mọi stream |
+| Danh sách bỏ qua | An Ninh · vtvprime.vn · link | Tối đa 300 mục, mỗi mục + ghi chú ≤ 200 ký tự; quy tắc bên dưới |
+| Lịch tự chạy | mỗi 3 giờ từ 01:00 | Mục 7 |
 
-Bên dưới (script tự ghi): dòng 7 **Lịch tự chạy** (đổi trên dashboard), dòng 8 **Trạng thái** lần chạy,
-dòng 9 **Thông báo**, từ dòng 10 khối **Lần chạy gần nhất**. Menu: *Chạy ngay* cho mọi người; các mục cài đặt / token / mã thao tác
-nằm trong menu con *Quản trị (chủ Sheet)*.
+- Bộ chọn trên dashboard lấy danh mục từ `options.json` (checker xuất mỗi lần chạy có nguồn: 178 quốc gia, 207 ngôn ngữ,
+  29 thể loại, tên tiếng Việt, số link; kèm chỉ mục từng link để ước tính phạm vi và xem trước danh sách bỏ qua).
+- Lưu: kiểm tra hợp lệ hết rồi mới lưu, chỉ lưu phần đổi; mỗi lần lưu tăng số phiên bản — lưu từ bản cũ hơn bị từ chối
+  (tránh hai người ghi đè nhau). Ai cũng xem được cấu hình; lưu cần mã thao tác.
+- Sheet `Config` chỉ để xem (script ghi): dòng 2 cấu hình hiện tại, 3 lịch tự chạy, 4 trạng thái lần chạy, 5 thông báo,
+  từ dòng 7 khối **Lần chạy gần nhất**. Menu: *Chạy ngay* cho mọi người; cài đặt / token / mã thao tác trong *Quản trị (chủ Sheet)*.
+- Nâng cấp từ bản cũ (cấu hình ở B3:B6 + sheet `Exclude`): tự chuyển một lần vào Apps Script, rồi xoá sheet `Exclude`.
 
-### Sheet `Exclude` (MKT sửa)
+### Danh sách bỏ qua — cách so khớp
 
-Cột A mỗi dòng một mục, cột B ghi chú, cột C **Đang bỏ** (script ghi sau mỗi lần chạy: *"2 link: An Ninh TV"*,
-*"Không khớp kênh nào"*…). Cách so khớp:
+Mỗi mục hiện *"Đang bỏ: 1 link: An Ninh TV"* / *"Không khớp kênh nào"* sau lần chạy (số link = số dòng bị bỏ khỏi danh sách).
+Cùng quy tắc (file `site/match.js`) dùng cho checker và phần xem trước trên dashboard:
 
 | Nhập | Bỏ những link nào |
 |---|---|
@@ -87,8 +93,8 @@ Khi check chỉ gửi `url`, `referrer` (header `Referer`), `user_agent` (header
 2. Quốc gia: đuôi channel ID ∈ danh sách.
 3. Ngôn ngữ: `languages` của feed giao với danh sách ≠ rỗng.
 4. Thể loại: `categories` của channel giao với danh sách ≠ rỗng.
-5. Ô trống = không lọc; nhiều giá trị trong 1 ô = OR; giữa các ô = AND. Stream không có metadata (`channel = null`) chỉ được giữ khi cả 3 ô đều trống.
-6. Loại các link khớp `Exclude` (quy tắc ở trên; chỉ tính trong phạm vi sau bước 1–5).
+5. Mục trống = không lọc; nhiều giá trị trong 1 mục = OR; giữa các mục = AND. Stream không có metadata (`channel = null`) chỉ được giữ khi cả 3 ô đều trống.
+6. Loại các link khớp danh sách bỏ qua (quy tắc ở trên; chỉ tính trong phạm vi sau bước 1–5).
 7. Giữ stream có label `Geo-blocked` / `Not 24/7`, gắn nhãn hiển thị.
 8. Dedupe URL.
 9. Mỗi channel+feed giữ 1 URL: không label → quality cao hơn (`1080p`/`1080i` → 1080, `null` → 0) → thứ tự trong API.
@@ -174,8 +180,9 @@ Thêm: lọc theo **Lý do**; thẻ *Không hoạt động* ghi số link *bị 
 cột **Hoạt động lần cuối** (thay *Kiểm tra lúc* vì mọi link được kiểm tra cùng lúc); **So với lần chạy trước**:
 *mới lỗi* (đang hoạt động → lỗi), *hoạt động lại*, *link mới*, số link bị bỏ khỏi danh sách (bấm để lọc) và ▲▼ trên thẻ
 (chỉ tính các link có ở cả hai lần chạy).
-Nút **Cài đặt** (cần mã thao tác): đổi **mức kiểm tra** (ghi vào ô B6 của Sheet, rồi tự chạy lại sau ~1–2 phút như khi sửa trong Sheet)
-và **lịch tự chạy**; kiểm tra hợp lệ hết rồi mới lưu, chỉ lưu phần thay đổi. Phạm vi (quốc gia / ngôn ngữ / thể loại) và Exclude vẫn chỉ sửa trong Sheet.
+Nút **Cài đặt**: toàn bộ cấu hình (mục 3) — bộ chọn quốc gia / ngôn ngữ / thể loại có tìm kiếm và số link, ước tính số link
+của phạm vi (cảnh báo khi > 3.000), mức kiểm tra, lịch, danh sách bỏ qua có xem trước *"Sẽ bỏ N link: …"*; tóm tắt thay đổi
+trước khi lưu. Lưu cần mã thao tác; lưu phạm vi / mức / danh sách bỏ qua → tự chạy lại sau ~1–2 phút.
 
 ## 7. Schedule
 
@@ -183,7 +190,7 @@ và **lịch tự chạy**; kiểm tra hợp lệ hết rồi mới lưu, chỉ 
 - Đánh đổi: lịch tự chạy cần GitHub token trong Sheet còn hạn — hết hạn thì không tự chạy (dashboard + ô Trạng thái báo lỗi).
 - Chạy tay: menu **IPTV Monitor → Chạy ngay**, nút **Chạy ngay** trên dashboard (cần mã thao tác), hoặc nút Run workflow trên GitHub.
 - Dashboard hiện trạng thái lần chạy (đang chờ / đang chạy / xong / lỗi — không có link GitHub, lỗi thì hướng dẫn "thử Chạy ngay lại; nếu vẫn lỗi, báo người quản lý") cho mọi người; chạy ngay và đổi lịch cần mã thao tác 8 ký tự (sai 10 lần → khoá 15 phút).
-- Sửa `Config` / `Exclude` → tự chạy sau ~1 phút.
+- Lưu phạm vi / mức / danh sách bỏ qua trên dashboard → tự chạy sau ~1 phút.
 
 ## 8. Error handling
 
@@ -208,7 +215,7 @@ và **lịch tự chạy**; kiểm tra hợp lệ hết rồi mới lưu, chỉ 
 
 ## 10. Quyền truy cập
 
-- MKT có quyền **Editor** trên Sheet (tự sửa `Config`, `Exclude`).
+- MKT xem kết quả trên dashboard / sheet `Streams`; người có **mã thao tác** chạy ngay và đổi cấu hình trên dashboard.
 - Chấp nhận: Editor mở được Apps Script và xem được token trong Script Properties. GitHub token chỉ có quyền
   Actions trên repo này (tệ nhất: chạy/huỷ workflow); bridge token chỉ đọc/ghi được chính Sheet này.
 - Sheet `Streams` khoá dạng cảnh báo (MKT vẫn lọc/sắp xếp được, sửa sẽ bị ghi đè); `_data` ẩn và khoá hẳn.

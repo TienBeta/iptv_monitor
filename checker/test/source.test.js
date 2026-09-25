@@ -118,8 +118,9 @@ describe('buildList', () => {
     const rules = excludeRules(['An Ninh', 'VTV', 'TV', 'Không có kênh này', 'https://x/khong-co.m3u8']);
     buildList(withNews, vn, rules);
     assert.deepEqual(excludeReport(rules), [
-      { entry: 'An Ninh', text: '2 link: ANTV' },
-      { entry: 'VTV', text: '6 link: VTV1.vn, VTV3.vn' },
+      // rows that leave the list: ANTV has a backup link in the same feed → 1
+      { entry: 'An Ninh', text: '1 link: ANTV' },
+      { entry: 'VTV', text: '3 link: VTV1.vn, VTV3.vn' }, // VTV1 HD + SD, VTV3 HD
       { entry: 'TV', text: 'Chưa dùng: cần ít nhất 3 chữ hoặc số' },
       { entry: 'Không có kênh này', text: 'Không khớp kênh nào' },
       { entry: 'https://x/khong-co.m3u8', text: 'Không khớp link nào (link phải giống hệt)' },

@@ -4,8 +4,8 @@ Tự động lấy danh sách kênh từ [iptv-org](https://github.com/iptv-org/
 theo lịch (mặc định mỗi 3 giờ), lưu kết quả vào Google Sheet và hiển thị trên dashboard tiếng Việt.
 
 ```text
-Google Sheet (Config, Exclude, Streams) + Apps Script (cầu nối, lịch tự chạy, "Chạy ngay")
-        ▲ đọc cấu hình + trạng thái cũ │ ghi kết quả        ▲ trạng thái, Chạy ngay, đổi lịch
+Google Sheet (Config chỉ xem, Streams) + Apps Script (cầu nối, cấu hình, lịch tự chạy, "Chạy ngay")
+        ▲ đọc cấu hình + trạng thái cũ │ ghi kết quả        ▲ trạng thái, Chạy ngay, Cài đặt
         │                               ▼                    │ (cần mã thao tác)
 GitHub Actions (Node.js) ── iptv-org API → lọc → kiểm tra stream
         │
@@ -23,7 +23,7 @@ GitHub Pages — https://tienbeta.github.io/iptv_monitor/ ──────┘
 |---|---|
 | `checker/` | Node.js, không thư viện ngoài: tải API (`source.js`), kiểm tra stream mức 1–4b (`check.js`, `http.js`), trạng thái (`status.js`), cầu nối Sheet (`bridge.js`), luồng chính (`index.js`) |
 | `apps-script/Code.gs` | Dán vào Google Sheet: web app `load`/`save` (cho Actions) và `status`/`run`/`schedule` (cho dashboard), lịch tự chạy, menu “Chạy ngay”, tự chạy lại khi sửa cấu hình |
-| `site/` | Dashboard tĩnh (HTML/CSS/JS thuần) |
+| `site/` | Dashboard tĩnh (HTML/CSS/JS thuần); `match.js` = quy tắc “bỏ qua”, dùng chung với checker |
 | `.github/workflows/check.yml` | Kiểm tra stream khi Apps Script gọi (theo lịch / Chạy ngay) hoặc chạy tay; đăng dashboard |
 | `.github/workflows/test.yml` | Chạy `npm test` khi có code mới |
 | `.github/workflows/smoke.yml` | Chạy tay: kiểm tra stream thật, không cần Sheet (không ghi Sheet, không đăng dashboard) |
