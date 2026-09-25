@@ -11,7 +11,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { callBridge, fromDataTable, toDataTable, toStreamsTable } from './bridge.js';
 import { checkStream } from './check.js';
-import { API_BASE, applyExclude, buildList, configHash, excludeReport, excludeRules, fetchSource, normalizeConfig } from './source.js';
+import { API_BASE, applyExclude, buildList, buildOptions, configHash, excludeReport, excludeRules, fetchSource, normalizeConfig } from './source.js';
 import { LEVEL_LABELS, STATUS_LABELS, STATUS_ORDER, countByStatus, nextState, reasonFor } from './status.js';
 import { formatDuration, hostOf, maskUrl, runPool } from './util.js';
 
@@ -139,6 +139,8 @@ export async function runMonitor({ env = process.env, checkOptions = {}, io = {}
   let sourceCount = lastRun.sourceCount || 0;
   try {
     const source = await (io.fetchSource || fetchSource)(env.SOURCE_BASE || API_BASE);
+    // Dashboard settings catalog; only written when the source loaded (the publish step keeps the last one).
+    await writeFile(path.join(outDir, 'options.json'), JSON.stringify({ generatedAt: Date.now(), ...buildOptions(source) }));
     list = buildList(source, config, rules);
     if (lastRun.configHash === hash && lastRun.sourceCount > 0 && list.length < lastRun.sourceCount * SOURCE_DROP_LIMIT) {
       throw new Error(`số link giảm bất thường: ${list.length} so với ${lastRun.sourceCount} lần trước`);

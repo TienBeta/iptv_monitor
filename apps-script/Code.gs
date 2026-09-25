@@ -3,14 +3,16 @@
  *
  * IPTV Monitor — Apps Script gắn với Google Sheet.
  *
+ * - Cấu hình (phạm vi, mức kiểm tra, danh sách bỏ qua, lịch) nằm trong Script
+ *   Properties và chỉ sửa trên dashboard; sheet Config chỉ để xem.
  * - Web app (doPost): GitHub Actions đọc cấu hình + trạng thái cũ ("load")
  *   và ghi kết quả ("save"). Mọi request phải có đúng BRIDGE_TOKEN.
  * - Menu IPTV Monitor → Chạy ngay (hoặc nút trên dashboard): gọi GitHub API
  *   để chạy workflow ngay.
- * - Sửa Config / Exclude: tự hẹn chạy lại sau khoảng 1 phút.
  * - Lịch tự chạy: trigger autoRun (mỗi 10 phút) chạy workflow đúng các giờ đã hẹn.
- * - Dashboard: xem trạng thái (doGet ?action=status, ai cũng xem được);
- *   "Chạy ngay", đổi mức kiểm tra và lịch (doPost run / settings) cần mã thao tác.
+ * - Dashboard: xem trạng thái + cấu hình (doGet ?action=status, ai cũng xem được);
+ *   "Chạy ngay" và đổi cấu hình (doPost run / settings) cần mã thao tác. Đổi
+ *   phạm vi / mức / danh sách bỏ qua → tự chạy lại sau khoảng 1 phút.
  *
  * Cài đặt từng bước: docs/setup.md trong repo.
  */
@@ -19,17 +21,16 @@ const GITHUB_REPO = 'TienBeta/iptv_monitor';
 const WORKFLOW_FILE = 'check.yml';
 const GITHUB_REF = 'main';
 
-const SHEET = { config: 'Config', exclude: 'Exclude', streams: 'Streams', data: '_data' };
-// Config: B3:B6 inputs · B7 lịch tự chạy · B8 trạng thái · B9 thông báo ·
-// A10 "LẦN CHẠY GẦN NHẤT" · summary from row 11. The script writes everything from row 7 down.
-const CELL = { schedule: 'B7', message: 'B9' };
-const INPUT_FIRST_ROW = 3; // B3:B6 = Quốc gia, Ngôn ngữ, Thể loại, Mức kiểm tra
-const INPUT_LAST_ROW = 6;
-const PROGRESS_ROW = 8;
-const SUMMARY_HEADER_ROW = 10;
+// "Exclude" only exists in Sheets set up before settings moved to the dashboard.
+const SHEET = { config: 'Config', streams: 'Streams', data: '_data', oldExclude: 'Exclude' };
+// Config is a read-only view the script writes: B2 cấu hình hiện tại · B3 lịch tự
+// chạy · B4 trạng thái · B5 thông báo · A7 "LẦN CHẠY GẦN NHẤT" · summary from row 8.
+const CELL = { config: 'B2', schedule: 'B3', message: 'B5' };
+const PROGRESS_ROW = 4;
+const SUMMARY_HEADER_ROW = 7;
 const STATE_COLORS = { busy: '#fff4cc', ok: '#d9f2e3', error: '#f8d4d4', idle: '#ffffff' };
 const JUST_SENT_MS = 2 * 60 * 1000; // after a dispatch, GitHub may take a few seconds to list the run
-const SUMMARY_ROW = 11;
+const SUMMARY_ROW = 8;
 const ACTIONS_URL = 'https://github.com/' + GITHUB_REPO + '/actions/workflows/' + WORKFLOW_FILE;
 const WATCH_MAX_MS = 3 * 60 * 60 * 1000;
 const SCHEDULE_HOURS = [1, 2, 3, 4, 6, 8, 12, 24];
@@ -50,6 +51,11 @@ const LEVEL_OPTIONS = [
   '4a - Có hình hoặc tiếng',
   '4b - Giải mã được hình',
 ];
+const DEFAULT_CONFIG = { countries: ['VN'], languages: [], categories: [], level: LEVEL_OPTIONS[2] };
+const EXCLUDE_MAX = 300; // lines
+const EXCLUDE_TEXT_MAX = 200; // characters per line / note
+const SCOPE_MAX = 300; // codes per list
+const CHUNK_CHARS = 2500; // Script Properties hold 9 kB per value; 2,500 characters fit even at 3 bytes each
 const STATUS_COLORS = {
   'Hoạt động': '#d9f2e3',
   'Chậm': '#fff4cc',
@@ -258,8 +264,8 @@ function checkCode_(given) {
 function setup() {
   const ss = SpreadsheetApp.getActive();
   ss.setSpreadsheetTimeZone('Asia/Ho_Chi_Minh');
+  migrateSheetConfig_(); // before the Config sheet is laid out again
   setupConfigSheet_(ss);
-  setupExcludeSheet_(ss);
   setupStreamsSheet_(ss);
   setupDataSheet_(ss);
   removeEmptyDefaultSheet_(ss);
@@ -267,95 +273,73 @@ function setup() {
   const props = PropertiesService.getScriptProperties();
   if (!props.getProperty('BRIDGE_TOKEN')) props.setProperty('BRIDGE_TOKEN', newToken_());
   if (!props.getProperty('DASHBOARD_CODE')) saveNewCode_();
-  installEditTrigger_(ss);
+  deleteTriggers_('onConfigEdit'); // settings are no longer edited in the Sheet
   ensureScheduleTrigger_();
-  showSchedule_();
+  showConfig_();
   ss.setActiveSheet(ss.getSheetByName(SHEET.config));
 
   alert_('Cài đặt xong.\n\nBridge token (dán vào GitHub secret SHEET_BRIDGE_TOKEN):\n\n' +
     props.getProperty('BRIDGE_TOKEN') +
-    '\n\nMã thao tác dashboard (Chạy ngay / đổi lịch): ' + props.getProperty('DASHBOARD_CODE') +
+    '\n\nMã thao tác dashboard (Chạy ngay / đổi cấu hình): ' + props.getProperty('DASHBOARD_CODE') +
     ' (tự đặt mã khác: menu IPTV Monitor → Quản trị → Đặt / đổi mã thao tác dashboard)' +
+    '\nCấu hình (sửa trên dashboard, nút "Cài đặt"): ' + configText_() +
     '\nLịch tự chạy: ' + scheduleText_(readSchedule_()) +
     '\n\nBước tiếp theo: Deploy → New deployment → Web app (xem docs/setup.md).');
 }
 
 function setupConfigSheet_(ss) {
   const sh = ss.getSheetByName(SHEET.config) || ss.insertSheet(SHEET.config, 0);
-  if (sh.getRange('A3').getValue() !== 'Quốc gia') {
-    sh.getRange('A1:C6').setValues([
-      ['IPTV MONITOR — CẤU HÌNH', '', ''],
-      ['Mục', 'Giá trị', 'Hướng dẫn'],
-      ['Quốc gia', 'VN', 'Mã 2 chữ cái, cách nhau dấu phẩy. VD: VN, TH. Để trống = tất cả quốc gia'],
-      ['Ngôn ngữ', '', 'Mã 3 chữ cái. VD: vie, eng. Để trống = không lọc'],
-      ['Thể loại', '', 'VD: news, sports, movies, kids, music. Để trống = không lọc'],
-      ['Mức kiểm tra', LEVEL_OPTIONS[2], 'Mức càng cao càng chắc chắn nhưng chạy lâu hơn'],
-    ]);
+  if (sh.getRange('A2').getValue() !== 'Cấu hình' || sh.getRange('A' + PROGRESS_ROW).getValue() !== 'Trạng thái') {
+    layoutConfigSheet_(sh, '');
   }
-  if (sh.getRange('A9').getValue() !== 'Thông báo') layoutRunRows_(sh);
   if (sh.getRange(PROGRESS_ROW, 2).getValue() === '') setProgress_('Sẵn sàng', ACTIONS_URL, 'idle', { phase: 'idle' });
-  sh.getRange('C6').setValue('Mức càng cao càng chắc chắn nhưng chạy lâu hơn. Đổi ở đây hoặc trên dashboard (nút "Cài đặt")');
-  sh.getRange('C7').setValue('Đổi trên dashboard: nút "Cài đặt"');
-  sh.getRange('C8').clearContent(); // the old "Xem chi tiết trên GitHub" link
-  sh.getRange('B6').setDataValidation(SpreadsheetApp.newDataValidation()
-    .requireValueInList(LEVEL_OPTIONS, true).setAllowInvalid(false).build());
   sh.getRange('A1').setFontWeight('bold').setFontSize(13);
-  sh.getRange('A2:C2').setFontWeight('bold').setBackground('#f1f3f4');
-  sh.getRange('A7:A9').setFontWeight('normal');
   sh.getRange('A' + SUMMARY_HEADER_ROW).setFontWeight('bold');
-  sh.getRange('B3:B6').setBackground('#fff8e1');
+  sh.getRange('C2').setFontColor('#5f6368');
   sh.setColumnWidth(1, 170);
-  sh.setColumnWidth(2, 260);
-  sh.setColumnWidth(3, 460);
-  // Warnings only: MKT edits B3:B6; labels and what the script writes stay intact.
-  protectOnce_(sh, 'A1:A30', 'Nhãn cấu hình');
-  protectOnce_(sh, 'B7:B9', 'Lịch, trạng thái, thông báo (script tự ghi)');
-  protectOnce_(sh, 'B' + SUMMARY_ROW + ':B30', 'Kết quả lần chạy (script tự ghi)');
+  sh.setColumnWidth(2, 520);
+  sh.setColumnWidth(3, 260);
+  if (!sh.getProtections(SpreadsheetApp.ProtectionType.SHEET).length) {
+    sh.protect().setDescription('Chỉ để xem — cấu hình sửa trên dashboard (nút "Cài đặt")').setWarningOnly(true);
+  }
 }
 
-// Rows 7–10 (lịch tự chạy, trạng thái, thông báo, header). Also turns the old
-// layout — B7 "Chạy ngay" checkbox, header in row 9, summary from row 10 — into
-// this one; the next run writes the summary again.
-function layoutRunRows_(sh) {
-  sh.getRange('B7').clearDataValidations(); // the old checkbox
-  sh.getRange('A7:C7').clearContent();
-  sh.getRange('A9:C30').clearContent();
-  sh.getRange('A7').setValue('Lịch tự chạy');
-  sh.getRange('A8').setValue('Trạng thái');
-  sh.getRange('A9').setValue('Thông báo');
+// The read-only layout. Also replaces the older ones (inputs in B3:B6, the run
+// block below them), after migrateSheetConfig_() has copied the inputs.
+function layoutConfigSheet_(sh, status) {
+  const all = sh.getRange('A1:C40');
+  all.clearContent();
+  all.clearDataValidations(); // the old level dropdown / "Chạy ngay" checkbox
+  all.setBackground(null);
+  all.setFontWeight('normal');
+  sh.getProtections(SpreadsheetApp.ProtectionType.RANGE).forEach(function (p) { p.remove(); }); // old range warnings
+  sh.getRange('A1:C5').setValues([
+    ['IPTV MONITOR', '', ''],
+    ['Cấu hình', '', 'Sửa trên dashboard: nút "Cài đặt"'],
+    ['Lịch tự chạy', '', ''],
+    ['Trạng thái', status || '', ''],
+    ['Thông báo', '', ''],
+  ]);
   sh.getRange('A' + SUMMARY_HEADER_ROW).setValue('LẦN CHẠY GẦN NHẤT');
 }
 
-function protectOnce_(sh, a1, description) {
-  const exists = sh.getProtections(SpreadsheetApp.ProtectionType.RANGE)
-    .some(function (p) { return p.getDescription() === description; });
-  if (!exists) sh.getRange(a1).protect().setDescription(description).setWarningOnly(true);
-}
-
-// B7: the schedule in words (it is changed on the dashboard).
-function showSchedule_() {
+// B2 / B3: the settings in words (they are changed on the dashboard).
+function showConfig_() {
   const sh = SpreadsheetApp.getActive().getSheetByName(SHEET.config);
   if (!sh) return;
   const s = readSchedule_();
-  const text = s.enabled
+  sh.getRange(CELL.config).setValue(configText_());
+  sh.getRange(CELL.schedule).setValue(s.enabled
     ? 'Mỗi ' + scheduleText_(s).slice(4)
-    : 'Đang tắt (chỉ chạy khi bấm Chạy ngay hoặc sửa cấu hình)';
-  sh.getRange(CELL.schedule).setValue(text);
+    : 'Đang tắt (chỉ chạy khi bấm Chạy ngay hoặc đổi cấu hình)');
 }
 
-// A: what to leave out — a name / channel ID / part of a link ("An Ninh") or a
-// full link. B: notes. C: what each line removes, written by the script after each run.
-function setupExcludeSheet_(ss) {
-  const sh = ss.getSheetByName(SHEET.exclude) || ss.insertSheet(SHEET.exclude);
-  sh.getRange('A1:C1').setValues([[
-    'Bỏ qua: tên kênh, mã kênh hoặc link (VD: An Ninh)', 'Ghi chú', 'Đang bỏ (tự cập nhật sau mỗi lần chạy)',
-  ]]);
-  sh.getRange('A1:C1').setFontWeight('bold').setBackground('#f1f3f4');
-  sh.setFrozenRows(1);
-  sh.setColumnWidth(1, 420);
-  sh.setColumnWidth(2, 260);
-  sh.setColumnWidth(3, 420);
-  protectOnce_(sh, 'C:C', 'Kết quả loại trừ (script tự ghi)');
+function configText_() {
+  const c = readConfig_();
+  const list = function (label, values) { return label + ': ' + (values.length ? values.join(', ') : 'tất cả'); };
+  const n = readExclude_().length;
+  return [list('Quốc gia', c.countries), list('Ngôn ngữ', c.languages), list('Thể loại', c.categories),
+    'Mức ' + c.level, 'Bỏ qua: ' + (n ? n + ' mục' : 'không')].join(' · ');
 }
 
 function setupStreamsSheet_(ss) {
@@ -393,42 +377,19 @@ function removeEmptyDefaultSheet_(ss) {
   });
 }
 
-function installEditTrigger_(ss) {
-  const exists = ScriptApp.getProjectTriggers().some(function (t) {
-    return t.getHandlerFunction() === 'onConfigEdit';
-  });
-  if (!exists) ScriptApp.newTrigger('onConfigEdit').forSpreadsheet(ss).onEdit().create();
-}
-
 function newToken_() {
   return (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '');
 }
 
 // ---------------------------------------------------------------- run now / auto-run
 
-// Installable trigger (runs as the owner, so MKT editors need no permission).
-function onConfigEdit(e) {
-  if (!e || !e.range) return;
-  const range = e.range;
-  const sh = range.getSheet();
-  const name = sh.getName();
-
-  if (name === SHEET.config) {
-    const touchesInputs = range.getColumn() <= 2 && range.getLastColumn() >= 2 &&
-      range.getRow() <= INPUT_LAST_ROW && range.getLastRow() >= INPUT_FIRST_ROW;
-    if (touchesInputs) {
-      scheduleRun_();
-      setMessage_('Cấu hình vừa thay đổi — sẽ tự chạy lại sau khoảng 1–2 phút.');
-    }
-    return;
-  }
-  if (name === SHEET.exclude && range.getColumn() === 1) { // notes (B) and the report (C) don't count
-    scheduleRun_();
-    setMessage_('Danh sách loại trừ vừa thay đổi — sẽ tự chạy lại sau khoảng 1–2 phút.');
-  }
+// The installable edit trigger of older versions (settings were edited in the
+// Sheet) may still exist until setup runs again: it only removes itself.
+function onConfigEdit() {
+  deleteTriggers_('onConfigEdit');
 }
 
-// Many edits in a row → one run: each edit replaces the pending trigger.
+// Several saves in a row → one run: each save replaces the pending trigger.
 function scheduleRun_() {
   deleteTriggers_('scheduledRun');
   ScriptApp.newTrigger('scheduledRun').timeBased().after(60 * 1000).create();
@@ -716,7 +677,7 @@ function saveSchedule_(input) {
   // The new plan starts at its next time, not with a catch-up run right now.
   props.setProperty('AUTO_SLOT', String(slotAt_(s, Date.now(), false)));
   ensureScheduleTrigger_();
-  showSchedule_();
+  showConfig_();
   setMessage_('Lịch tự chạy: ' + scheduleText_(s) + ' (đổi lúc ' + hhmm_(new Date()) + ').');
   return s;
 }
@@ -804,16 +765,24 @@ function statusPayload_() {
       next: nextRunAt_(s, now),
     },
     everyHoursOptions: SCHEDULE_HOURS,
-    config: { level: currentLevel_() },
+    config: publicConfig_(),
     levelOptions: LEVEL_OPTIONS,
     ready: { github: !!props.getProperty('GITHUB_TOKEN'), code: !!props.getProperty('DASHBOARD_CODE') },
   };
 }
 
-// Config!B6, the level the next run uses.
-function currentLevel_() {
-  const sh = SpreadsheetApp.getActive().getSheetByName(SHEET.config);
-  return sh ? String(sh.getRange('B6').getValue()) : '';
+// What the dashboard shows and edits (public, like the results).
+function publicConfig_() {
+  const c = readConfig_();
+  const report = readBig_('EXCLUDE_REPORT', {});
+  return {
+    countries: c.countries,
+    languages: c.languages,
+    categories: c.categories,
+    level: c.level,
+    exclude: readExclude_().map(function (e) { return { entry: e.entry, note: e.note, report: report[e.entry] || '' }; }),
+    rev: configRev_(),
+  };
 }
 
 function handleControl_(req) {
@@ -831,33 +800,199 @@ function handleControl_(req) {
       status: statusPayload_(),
     };
   }
-  // "settings": level and/or schedule ("schedule" from older dashboards). All is
-  // checked before anything is saved; only what changed is saved.
-  let schedule = null;
-  let level = null;
+  // "settings" ("schedule" from older dashboards): scope, level, exclude list and
+  // schedule, each optional. Refused if someone else saved since the page loaded
+  // (rev). Everything is checked before anything is saved; only changes are saved.
+  if (req.rev !== undefined && req.rev !== null && Number(req.rev) !== configRev_()) {
+    return {
+      ok: false, error: 'conflict', status: statusPayload_(),
+      message: 'Cấu hình vừa được đổi ở nơi khác — đã tải lại cấu hình mới nhất, hãy xem và sửa lại.',
+    };
+  }
+  const current = readConfig_();
+  const changes = {};
   try {
     if (req.schedule) {
-      schedule = validSchedule_(req.schedule);
-      if (JSON.stringify(schedule) === JSON.stringify(readSchedule_())) schedule = null;
+      const schedule = validSchedule_(req.schedule);
+      if (JSON.stringify(schedule) !== JSON.stringify(readSchedule_())) changes.schedule = schedule;
     }
     if (req.level !== undefined && req.level !== null && req.level !== '') {
       if (LEVEL_OPTIONS.indexOf(String(req.level)) < 0) throw new Error('Mức kiểm tra không hợp lệ.');
-      if (String(req.level) !== currentLevel_()) level = String(req.level);
+      if (String(req.level) !== current.level) changes.level = String(req.level);
+    }
+    if (req.scope) {
+      const scope = validScope_(req.scope);
+      if (JSON.stringify(scope) !== JSON.stringify(
+        { countries: current.countries, languages: current.languages, categories: current.categories })) changes.scope = scope;
+    }
+    if (req.exclude) {
+      const exclude = validExclude_(req.exclude);
+      if (JSON.stringify(exclude) !== JSON.stringify(readExclude_())) changes.exclude = exclude;
     }
   } catch (err) {
     return { ok: false, error: 'invalid', message: err.message };
   }
-  if (schedule) saveSchedule_(schedule);
-  if (level) {
-    // Same as editing B6 in the Sheet: one run with the new level in about a minute.
-    SpreadsheetApp.getActive().getSheetByName(SHEET.config).getRange('B6').setValue(level);
-    scheduleRun_();
-    setMessage_('Mức kiểm tra đổi thành "' + level + '" từ dashboard lúc ' + hhmm_(new Date()) +
+  const what = [];
+  if (changes.scope) what.push('phạm vi');
+  if (changes.level) what.push('mức kiểm tra');
+  if (changes.exclude) what.push('danh sách bỏ qua');
+  if (changes.schedule) what.push('lịch tự chạy');
+  if (!what.length) return { ok: true, message: 'Không có gì thay đổi.', status: statusPayload_() };
+
+  if (changes.schedule) saveSchedule_(changes.schedule);
+  if (changes.scope || changes.level) {
+    const next = Object.assign({}, current, changes.scope || {}, changes.level ? { level: changes.level } : {});
+    PropertiesService.getScriptProperties().setProperty('CONFIG', JSON.stringify(next));
+  }
+  if (changes.exclude) writeBig_('EXCLUDE', changes.exclude);
+  bumpConfigRev_();
+  showConfig_();
+  const rerun = !!(changes.scope || changes.level || changes.exclude);
+  if (rerun) scheduleRun_(); // one run with the new settings in about a minute
+  if (rerun) { // (a schedule-only change keeps saveSchedule_'s message, which lists the new times)
+    setMessage_('Cấu hình đổi từ dashboard lúc ' + hhmm_(new Date()) + ' (' + what.join(', ') + ')' +
       ' — sẽ tự chạy lại sau khoảng 1–2 phút.');
   }
-  const message = level ? 'Đã lưu. Sẽ tự chạy lại với mức kiểm tra mới sau khoảng 1–2 phút.'
-    : schedule ? 'Đã lưu lịch tự chạy.' : 'Không có gì thay đổi.';
-  return { ok: true, message: message, status: statusPayload_() };
+  return {
+    ok: true,
+    message: 'Đã lưu ' + what.join(', ') + '.' + (rerun ? ' Sẽ tự chạy lại sau khoảng 1–2 phút.' : ''),
+    status: statusPayload_(),
+  };
+}
+
+function validScope_(scope) {
+  const list = function (values, re, fix, label) {
+    if (values === undefined || values === null) return [];
+    if (!Array.isArray(values)) throw new Error(label + ' không hợp lệ.');
+    const out = [];
+    values.forEach(function (v) {
+      const code = fix(String(v).trim());
+      if (!re.test(code)) throw new Error(label + ' không hợp lệ: ' + String(v).slice(0, 40));
+      if (out.indexOf(code) < 0) out.push(code);
+    });
+    if (out.length > SCOPE_MAX) throw new Error(label + ': tối đa ' + SCOPE_MAX + ' mục.');
+    return out;
+  };
+  const upper = function (v) { return v.toUpperCase() === 'GB' ? 'UK' : v.toUpperCase(); }; // iptv-org says UK
+  const lower = function (v) { return v.toLowerCase(); };
+  return {
+    countries: list(scope.countries, /^[A-Z]{2}$/, upper, 'Mã quốc gia'),
+    languages: list(scope.languages, /^[a-z]{3}$/, lower, 'Mã ngôn ngữ'),
+    categories: list(scope.categories, /^[a-z][a-z0-9-]{1,30}$/, lower, 'Thể loại'),
+  };
+}
+
+function validExclude_(lines) {
+  if (!Array.isArray(lines)) throw new Error('Danh sách bỏ qua không hợp lệ.');
+  const out = [];
+  const seen = {};
+  lines.forEach(function (line) {
+    const entry = String((line && line.entry) || '').trim();
+    const note = String((line && line.note) || '').trim();
+    if (!entry || seen[entry]) return;
+    if (entry.length > EXCLUDE_TEXT_MAX || note.length > EXCLUDE_TEXT_MAX) {
+      throw new Error('Mỗi mục bỏ qua / ghi chú tối đa ' + EXCLUDE_TEXT_MAX + ' ký tự.');
+    }
+    seen[entry] = true;
+    out.push({ entry: entry, note: note });
+  });
+  if (out.length > EXCLUDE_MAX) throw new Error('Danh sách bỏ qua tối đa ' + EXCLUDE_MAX + ' mục.');
+  return out;
+}
+
+// ---------------------------------------------------------------- settings storage
+
+// Settings live in Script Properties. The exclude list and its report can pass
+// the 9 kB-per-value limit, so they are stored in chunks (KEY_N, KEY_0, KEY_1…).
+function writeBig_(key, value) {
+  const props = PropertiesService.getScriptProperties();
+  const text = JSON.stringify(value);
+  const old = Number(props.getProperty(key + '_N') || 0);
+  const n = Math.max(1, Math.ceil(text.length / CHUNK_CHARS));
+  for (let i = 0; i < n; i++) props.setProperty(key + '_' + i, text.slice(i * CHUNK_CHARS, (i + 1) * CHUNK_CHARS));
+  props.setProperty(key + '_N', String(n));
+  for (let i = n; i < old; i++) props.deleteProperty(key + '_' + i);
+}
+
+function readBig_(key, fallback) {
+  const props = PropertiesService.getScriptProperties();
+  const n = Number(props.getProperty(key + '_N') || 0);
+  if (!n) return fallback;
+  let text = '';
+  for (let i = 0; i < n; i++) text += props.getProperty(key + '_' + i) || '';
+  try {
+    return JSON.parse(text);
+  } catch (err) {
+    return fallback;
+  }
+}
+
+function readConfig_() {
+  migrateSheetConfig_();
+  const c = JSON.parse(PropertiesService.getScriptProperties().getProperty('CONFIG') || 'null') || DEFAULT_CONFIG;
+  return {
+    countries: c.countries || [],
+    languages: c.languages || [],
+    categories: c.categories || [],
+    level: LEVEL_OPTIONS.indexOf(c.level) >= 0 ? c.level : DEFAULT_CONFIG.level,
+  };
+}
+
+// [{ entry, note }]
+function readExclude_() {
+  migrateSheetConfig_();
+  return readBig_('EXCLUDE', []);
+}
+
+function configRev_() {
+  return Number(PropertiesService.getScriptProperties().getProperty('CONFIG_REV') || 0);
+}
+
+function bumpConfigRev_() {
+  PropertiesService.getScriptProperties().setProperty('CONFIG_REV', String(configRev_() + 1));
+}
+
+// Once, after updating from a version that kept settings in the Sheet: copy
+// Config!B3:B6 and the "Exclude" sheet (lines, notes, report) into Script
+// Properties, delete "Exclude" and turn Config into the read-only view. Runs
+// from setup, load or the dashboard status — whichever comes first.
+function migrateSheetConfig_() {
+  const props = PropertiesService.getScriptProperties();
+  if (props.getProperty('CONFIG')) return;
+  const ss = SpreadsheetApp.getActive();
+  const config = JSON.parse(JSON.stringify(DEFAULT_CONFIG));
+  const sh = ss.getSheetByName(SHEET.config);
+  const old = sh && sh.getRange('A3').getValue() === 'Quốc gia';
+  let status = '';
+  if (old) {
+    const v = sh.getRange('B3:B6').getDisplayValues().map(function (r) { return String(r[0]).trim(); });
+    const split = function (text) { return text.split(/[\s,;]+/).filter(String); };
+    config.countries = split(v[0]).map(function (x) { return x.toUpperCase() === 'GB' ? 'UK' : x.toUpperCase(); });
+    config.languages = split(v[1]).map(function (x) { return x.toLowerCase(); });
+    config.categories = split(v[2]).map(function (x) { return x.toLowerCase(); });
+    if (LEVEL_OPTIONS.indexOf(v[3]) >= 0) config.level = v[3];
+    if (sh.getRange('A8').getValue() === 'Trạng thái') status = String(sh.getRange('B8').getValue());
+  }
+  const exclude = [];
+  const report = {};
+  const ex = ss.getSheetByName(SHEET.oldExclude);
+  if (ex && ex.getLastRow() > 1) {
+    ex.getRange(2, 1, ex.getLastRow() - 1, 3).getDisplayValues().forEach(function (r) {
+      const entry = String(r[0]).trim().slice(0, EXCLUDE_TEXT_MAX);
+      if (!entry || exclude.some(function (e) { return e.entry === entry; })) return;
+      exclude.push({ entry: entry, note: String(r[1]).trim().slice(0, EXCLUDE_TEXT_MAX) });
+      if (String(r[2]).trim()) report[entry] = String(r[2]).trim();
+    });
+  }
+  props.setProperty('CONFIG', JSON.stringify(config));
+  writeBig_('EXCLUDE', exclude.slice(0, EXCLUDE_MAX));
+  writeBig_('EXCLUDE_REPORT', report);
+  props.setProperty('CONFIG_REV', '1');
+  if (ex && ss.getSheets().length > 1) ss.deleteSheet(ex);
+  if (old) {
+    layoutConfigSheet_(sh, status);
+    showConfig_();
+  }
 }
 
 // The checker calls "load" when a run starts. A run not started from the
@@ -917,16 +1052,9 @@ function doPost(e) {
 
 function handleLoad_() {
   const ss = SpreadsheetApp.getActive();
-  const cfg = ss.getSheetByName(SHEET.config);
-  if (!cfg) throw new Error('chưa có sheet Config — chạy menu IPTV Monitor → Quản trị → Cài đặt ban đầu');
-  const v = cfg.getRange(INPUT_FIRST_ROW, 2, INPUT_LAST_ROW - INPUT_FIRST_ROW + 1, 1).getDisplayValues()
-    .map(function (r) { return r[0]; });
-
-  const ex = ss.getSheetByName(SHEET.exclude);
-  const exclude = ex && ex.getLastRow() > 1
-    ? ex.getRange(2, 1, ex.getLastRow() - 1, 1).getDisplayValues()
-      .map(function (r) { return String(r[0]).trim(); }).filter(String)
-    : [];
+  if (!ss.getSheetByName(SHEET.config)) throw new Error('chưa có sheet Config — chạy menu IPTV Monitor → Quản trị → Cài đặt ban đầu');
+  const c = readConfig_();
+  const exclude = readExclude_().map(function (e) { return e.entry; });
 
   const dataSheet = ss.getSheetByName(SHEET.data);
   let data = null;
@@ -943,7 +1071,7 @@ function handleLoad_() {
   }
   return {
     ok: true,
-    config: { countries: v[0], languages: v[1], categories: v[2], level: v[3] },
+    config: { countries: c.countries.join(', '), languages: c.languages.join(', '), categories: c.categories.join(', '), level: c.level },
     exclude: exclude,
     data: data,
     lastRun: lastRun,
@@ -957,7 +1085,7 @@ function handleSave_(req) {
   writeTable_(dataSheet, req.data.header, req.data.rows, {});
   writeTable_(streamsSheet, req.streams.header, req.streams.rows, { dateColumn: req.streams.dateColumn, keepFilter: true });
   writeSummary_(ss, req.summary);
-  if (req.exclude) writeExcludeReport_(ss, req.exclude);
+  if (req.exclude) saveExcludeReport_(req.exclude);
   PropertiesService.getScriptProperties().setProperty('LAST_RUN', JSON.stringify({
     sourceCount: req.summary.sourceCount,
     configHash: req.summary.configHash,
@@ -966,18 +1094,11 @@ function handleSave_(req) {
   return { ok: true, rows: req.data.rows.length };
 }
 
-// Exclude!C: next to each line, what it removed in this run ("2 link: ANTV, …").
-function writeExcludeReport_(ss, report) {
-  const sh = ss.getSheetByName(SHEET.exclude);
-  if (!sh || sh.getLastRow() < 2) return;
+// What each exclude line removed in this run ("2 link: An Ninh TV"), shown on the dashboard.
+function saveExcludeReport_(report) {
   const byEntry = {};
-  report.forEach(function (r) { byEntry[String(r.entry)] = String(r.text); });
-  const n = sh.getLastRow() - 1;
-  const values = sh.getRange(2, 1, n, 1).getDisplayValues().map(function (row) {
-    const entry = String(row[0]).trim();
-    return [entry && byEntry[entry] !== undefined ? cell_(byEntry[entry], false) : ''];
-  });
-  sh.getRange(2, 3, n, 1).setValues(values);
+  (report || []).forEach(function (r) { byEntry[String(r.entry)] = String(r.text); });
+  writeBig_('EXCLUDE_REPORT', byEntry);
 }
 
 // Whole table in one setValues; keeps the MKT filter criteria on Streams.

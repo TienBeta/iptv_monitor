@@ -3,7 +3,7 @@
 // the 50% guard, Exclude, state carried across runs, and local mode.
 
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { after, before, describe, test } from 'node:test';
@@ -81,6 +81,13 @@ const results = () => JSON.parse(readFileSync(path.join(outDir, 'results.json'),
 const streamsSheet = () => gas.sheet('Streams').rows().slice(1);
 const byTitle = (title) => streamsSheet().find((r) => r[0] === title);
 const config = (a1) => gas.sheet('Config').getRange(a1).getValue();
+// Settings live in Apps Script and are changed from the dashboard ("settings" + operator code).
+const settings = (body) => {
+  const res = gas.post({ action: 'settings', code: gas.props.get('DASHBOARD_CODE'), ...body });
+  assert.equal(res.ok, true, res.message);
+  return res;
+};
+const excludeReport = () => gas.get({ action: 'status' }).config.exclude.map((e) => e.report);
 
 describe('toàn bộ luồng qua Google Sheet (giả lập)', () => {
   test('lần 1: API OK → lọc VN, bỏ URL trùng, ghi Sheet + results.json', async () => {
@@ -92,11 +99,11 @@ describe('toàn bộ luồng qua Google Sheet (giả lập)', () => {
     assert.equal(byTitle('VTV2')[4], 'Đang lỗi'); // first failure
     assert.equal(byTitle('VTV2')[5], 'Bị chặn truy cập (có thể do giới hạn quốc gia)');
     assert.equal(byTitle('VTV1')[2], '🇻🇳 Việt Nam');
-    assert.equal(config('A12'), 'Nguồn dữ liệu');
-    assert.equal(config('B12'), 'Bình thường');
-    assert.equal(config('A13'), 'Kết quả');
-    assert.equal(config('B13'), '5 link: 4 hoạt động · 1 đang lỗi');
-    assert.equal(config('A14'), 'Thời gian chạy');
+    assert.equal(config('A9'), 'Nguồn dữ liệu');
+    assert.equal(config('B9'), 'Bình thường');
+    assert.equal(config('A10'), 'Kết quả');
+    assert.equal(config('B10'), '5 link: 4 hoạt động · 1 đang lỗi');
+    assert.equal(config('A11'), 'Thời gian chạy');
     const data = results();
     assert.equal(data.total, 5);
     assert.equal(data.counts.ONLINE, 4);
@@ -112,6 +119,9 @@ describe('toàn bộ luồng qua Google Sheet (giả lập)', () => {
     assert.equal(vtv2.lastOnline, 0);
     assert.ok(data.streams.find((x) => x.title === 'VTV1').lastOnline > 0);
     assert.ok(!('blocked' in data.streams.find((x) => x.title === 'VTV1')));
+    const options = JSON.parse(readFileSync(path.join(outDir, 'options.json'), 'utf8'));
+    assert.deepEqual(options.countries.map((c) => [c.code, c.n]), [['VN', 5], ['TH', 1]]);
+    assert.equal(options.links.length, 7 - 1); // duplicate URL removed
   });
   test('lần 2: lỗi lần thứ 2 → Không hoạt động; stream vừa chết → Đang lỗi', async () => {
     streams.breakFlip();
@@ -133,12 +143,14 @@ describe('toàn bộ luồng qua Google Sheet (giả lập)', () => {
   });
   test('API lỗi → SOURCE_ERROR, giữ danh sách cũ và vẫn check', async () => {
     apiMode = 'down';
+    rmSync(path.join(outDir, 'options.json'), { force: true });
     const { summary } = await run();
     assert.equal(summary.sourceStatus, 'SOURCE_ERROR');
     assert.equal(summary.total, 5);
     assert.equal(byTitle('VTV3')[4], 'Không hoạt động'); // checked again from the old list
-    assert.match(config('B12'), /^Lỗi nguồn, đang dùng danh sách cũ/);
+    assert.match(config('B9'), /^Lỗi nguồn, đang dùng danh sách cũ/);
     assert.equal(results().sourceStatus, 'SOURCE_ERROR');
+    assert.equal(existsSync(path.join(outDir, 'options.json')), false); // the publish step keeps the last one
   });
   test('API trả rỗng → SOURCE_ERROR, không xoá dữ liệu', async () => {
     apiMode = 'empty';
@@ -154,7 +166,7 @@ describe('toàn bộ luồng qua Google Sheet (giả lập)', () => {
   });
   test('đổi cấu hình (thêm TH) → không bị coi là lỗi nguồn', async () => {
     apiMode = 'ok';
-    gas.sheet('Config').getRange('B3').setValue('VN, TH');
+    settings({ scope: { countries: ['VN', 'TH'] } });
     const { summary } = await run();
     assert.equal(summary.sourceStatus, 'OK');
     assert.equal(summary.total, 6);
@@ -162,32 +174,30 @@ describe('toàn bộ luồng qua Google Sheet (giả lập)', () => {
     assert.equal(results().streams.find((x) => x.title === 'ThaiPBS').prev, ''); // new in the list
   });
   test('thu hẹp phạm vi (chỉ TH) → hợp lệ vì cấu hình đã đổi', async () => {
-    gas.sheet('Config').getRange('B3').setValue('TH');
+    settings({ scope: { countries: ['TH'] } });
     const { summary } = await run();
     assert.equal(summary.sourceStatus, 'OK');
     assert.equal(summary.total, 1);
   });
   test('Exclude → link bị bỏ khỏi danh sách', async () => {
-    gas.sheet('Config').getRange('B3').setValue('VN');
-    gas.sheet('Exclude').getRange('A2').setValue(`${streams.base}/geo.m3u8?token=secret456`);
+    settings({ scope: { countries: ['VN'] }, exclude: [{ entry: `${streams.base}/geo.m3u8?token=secret456`, note: '' }] });
     const { summary } = await run();
     assert.equal(summary.total, 4);
     assert.equal(byTitle('VTV2'), undefined);
     assert.equal(results().removed, 1);
-    assert.equal(gas.sheet('Exclude').getRange('C2').getValue(), '1 link: VTV2.vn'); // "Đang bỏ"
+    assert.deepEqual(excludeReport(), ['1 link: VTV2.vn']); // "Đang bỏ"
   });
   test('Exclude bằng chữ: "vtv" bỏ mọi kênh VTV; cột "Đang bỏ" liệt kê kênh', async () => {
-    const link = gas.sheet('Exclude').getRange('A2').getValue();
-    gas.sheet('Exclude').getRange('A2:A3').setValues([['vtv'], ['TV']]);
+    const before = gas.get({ action: 'status' }).config.exclude;
+    settings({ exclude: [{ entry: 'vtv', note: '' }, { entry: 'TV', note: '' }] });
     const { summary } = await run();
     assert.equal(summary.total, 2); // HTV7 + THVL1
     assert.equal(byTitle('VTV1'), undefined);
-    assert.equal(gas.sheet('Exclude').getRange('C2').getValue(), '3 link: VTV1.vn, VTV2.vn, VTV3.vn');
-    assert.equal(gas.sheet('Exclude').getRange('C3').getValue(), 'Chưa dùng: cần ít nhất 3 chữ hoặc số');
-    gas.sheet('Exclude').getRange('A2:A3').setValues([[link], ['']]);
+    assert.deepEqual(excludeReport(), ['3 link: VTV1.vn, VTV2.vn, VTV3.vn', 'Chưa dùng: cần ít nhất 3 chữ hoặc số']);
+    settings({ exclude: before.map(({ entry, note }) => ({ entry, note })) });
   });
-  test('mức kiểm tra lấy từ dropdown trong Sheet', async () => {
-    gas.sheet('Config').getRange('B6').setValue('1 - Link có phản hồi');
+  test('mức kiểm tra đổi trên dashboard được áp dụng', async () => {
+    settings({ level: '1 - Link có phản hồi' });
     const { summary } = await run();
     assert.equal(summary.level, '1');
     assert.equal(results().levelLabel, '1 - Link có phản hồi');
@@ -219,9 +229,7 @@ describe('chế độ khác', () => {
     const orig = console.log;
     console.log = (...a) => lines.push(a.join(' '));
     try {
-      gas.sheet('Config').getRange('B6').setValue('3 - Tải được dữ liệu video');
-      gas.sheet('Config').getRange('B3').setValue('VN');
-      gas.sheet('Exclude').getRange('A2').setValue('');
+      settings({ level: '3 - Tải được dữ liệu video', scope: { countries: ['VN'] }, exclude: [] });
       await runMonitor({ env: env(), checkOptions: FAST });
     } finally {
       console.log = orig;
