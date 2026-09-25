@@ -11,7 +11,8 @@ import vm from 'node:vm';
 const colToNum = (s) => [...s].reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0);
 
 class FakeProtection {
-  constructor(type) { this.type = type; this.warningOnly = false; }
+  constructor(type, sheet) { this.type = type; this.sheet = sheet; this.warningOnly = false; }
+  remove() { this.sheet.protections = this.sheet.protections.filter((p) => p !== this); }
   setDescription(d) { this.description = d; return this; }
   getDescription() { return this.description || ''; }
   setWarningOnly(w) { this.warningOnly = w; return this; }
@@ -67,8 +68,9 @@ class FakeRange {
   insertCheckboxes() { if (this.getValue() === '') this.setValue(false); return this; }
   clearDataValidations() { this.sheet.validations = (this.sheet.validations || []).filter((v) => v !== this.getA1Notation()); return this; }
   createFilter() { this.sheet.filter = new FakeFilter(this.sheet, this); return this.sheet.filter; }
-  protect() { const p = new FakeProtection('RANGE'); this.sheet.protections.push(p); return p; }
+  protect() { const p = new FakeProtection('RANGE', this.sheet); this.sheet.protections.push(p); return p; }
   setFontWeight() { return this; }
+  setFontColor() { return this; }
   setFontSize() { return this; }
   setBackground(c) { this.sheet.backgrounds[`${this.row},${this.col}`] = c; return this; }
 }
@@ -119,7 +121,7 @@ class FakeSheet {
   getDataRange() { return this.getRange(1, 1, Math.max(1, this.getLastRow()), Math.max(1, this.getLastColumn())); }
   getFilter() { return this.filter; }
   getProtections(type) { return this.protections.filter((p) => !type || p.type === type); }
-  protect() { const p = new FakeProtection('SHEET'); this.protections.push(p); return p; }
+  protect() { const p = new FakeProtection('SHEET', this); this.protections.push(p); return p; }
   hideSheet() { this.hidden = true; return this; }
   setFrozenRows() { return this; }
   setColumnWidth() { return this; }
@@ -197,7 +199,11 @@ export function loadAppsScript(file = new URL('../../apps-script/Code.gs', impor
     PropertiesService: {
       getScriptProperties: () => ({
         getProperty: (k) => (props.has(k) ? props.get(k) : null),
-        setProperty: (k, v) => props.set(k, String(v)),
+        setProperty: (k, v) => {
+          // Apps Script: 9 kB per value
+          if (Buffer.byteLength(String(v), 'utf8') > 9 * 1024) throw new Error(`Property ${k} quá 9 kB`);
+          props.set(k, String(v));
+        },
         deleteProperty: (k) => props.delete(k),
       }),
     },

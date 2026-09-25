@@ -4,7 +4,7 @@ Tất cả làm trên trình duyệt, **không cần cài Node.js / Python / Doc
 
 Bạn sẽ có:
 
-- **Google Sheet** — nơi MKT chọn quốc gia / mức kiểm tra và xem kết quả.
+- **Google Sheet** — nơi lưu kết quả (sheet `Streams`) và nơi chủ Sheet quản trị (token, mã thao tác).
 - **GitHub Actions** — kiểm tra stream theo lịch (mặc định mỗi 3 giờ; đổi được trên dashboard).
 - **Dashboard** — `https://tienbeta.github.io/iptv_monitor/`: kết quả, nút **Chạy ngay**, trạng thái lần chạy, **Cài đặt** (mức kiểm tra + lịch tự chạy).
 
@@ -35,7 +35,8 @@ Thứ tự: A (Sheet) → B (GitHub) → C (chạy lần đầu) → D (chia s�
    Hộp thoại cũng có **mã thao tác dashboard** (mã ngẫu nhiên dạng `ABCD-EFGH`, dùng ở mục D; đổi được) và lịch tự chạy mặc định.
    Muốn mã dễ nhớ: **IPTV Monitor → Quản trị → Đặt / đổi mã thao tác dashboard** → gõ mã của bạn (VD `VULCAN-2026`).
 
-Sheet giờ có: `Config`, `Exclude`, `Streams` và `_data` (ẩn).
+Sheet giờ có: `Config` (chỉ để xem: cấu hình hiện tại, lịch, trạng thái, kết quả), `Streams` và `_data` (ẩn).
+Cấu hình (phạm vi, mức kiểm tra, danh sách bỏ qua, lịch) nằm trong Apps Script và **chỉ sửa trên dashboard** (nút **Cài đặt**).
 
 **A5. Deploy web app** (để GitHub Actions đọc/ghi được Sheet).
 1. Ở tab Apps Script: nút **Deploy (Triển khai) → New deployment (Tuỳ chọn triển khai mới)**.
@@ -87,20 +88,14 @@ Sheet giờ có: `Config`, `Exclude`, `Streams` và `_data` (ẩn).
 
 ## C. Chạy lần đầu
 
-**C1. Chọn phạm vi.** Sheet `Config`:
+**C1. Phạm vi mặc định.** Lần đầu hệ thống kiểm tra **Việt Nam, mức 3 - Tải được dữ liệu video**, mỗi 3 giờ.
+Đổi phạm vi / mức / danh sách bỏ qua / lịch trên dashboard sau lần chạy đầu (mục C6).
 
-| Ô | Ví dụ | Ghi chú |
-|---|---|---|
-| B3 Quốc gia | `VN` | Nhiều nước: `VN, TH`. Để trống = tất cả (~13.000 link) |
-| B4 Ngôn ngữ | để trống | VD `vie` |
-| B5 Thể loại | để trống | VD `news, sports` |
-| B6 Mức kiểm tra | `3 - Tải được dữ liệu video` | Chọn trong danh sách |
-
-**C2. Chạy.** Menu **IPTV Monitor → Chạy ngay**. Ô **B9 Thông báo** báo *“Đã gửi yêu cầu chạy lúc …”*.
+**C2. Chạy.** Menu **IPTV Monitor → Chạy ngay**. Ô **B5 Thông báo** báo *“Đã gửi yêu cầu chạy lúc …”*.
 (Hoặc trên GitHub: tab **Actions → IPTV check → Run workflow → main → Run workflow**.
-Nút **Chạy ngay** trên dashboard dùng được từ sau lần chạy đầu tiên này.)
+Nút **Chạy ngay** và **Cài đặt** trên dashboard dùng được từ sau lần chạy đầu tiên này.)
 
-**C3. Theo dõi.** Ngay trong sheet `Config`, dòng 8 **Trạng thái** tự cập nhật mỗi phút:
+**C3. Theo dõi.** Ngay trong sheet `Config`, dòng 4 **Trạng thái** tự cập nhật mỗi phút:
 *⏳ Đang chờ GitHub bắt đầu chạy…* → *⏳ Đang chạy… (đã N phút)* (nền vàng) → *✓ Xong lúc …* (nền xanh) hoặc *✗ Lỗi lúc …* (nền đỏ).
 Khi đang ⏳, “Chạy ngay” (ở Sheet hay dashboard) sẽ bị từ chối — kể cả khi đang chạy theo lịch — để không tạo nhiều lần chạy chồng nhau.
 Dashboard hiện cùng trạng thái này ở thanh trên cùng.
@@ -114,10 +109,22 @@ Khoảng 1–2 phút sau mở <https://tienbeta.github.io/iptv_monitor/>.
 
 **C5. Kiểm tra.**
 - Sheet `Streams` có danh sách kênh, cột **Trạng thái** tô màu.
-- Sheet `Config`: dòng 7 **Lịch tự chạy** (*Mỗi 3 giờ (01:00, 04:00, …)*); khối **LẦN CHẠY GẦN NHẤT** có thời điểm, nguồn dữ liệu, kết quả (*84 link: 70 hoạt động · 14 không hoạt động*), thời gian chạy, link dashboard.
+- Sheet `Config`: dòng 2 **Cấu hình** (*Quốc gia: VN · … · Mức 3 - … · Bỏ qua: không*), dòng 3 **Lịch tự chạy** (*Mỗi 3 giờ (01:00, 04:00, …)*); khối **LẦN CHẠY GẦN NHẤT** có thời điểm, nguồn dữ liệu, kết quả (*84 link: 70 hoạt động · 14 không hoạt động*), thời gian chạy, link dashboard.
 - Dashboard hiện cùng số liệu.
 - Dashboard: thanh trên cùng ghi *Đã chạy xong* và *Tự chạy mỗi 3 giờ · lần tới …*.
 - Sau vài giờ, tab **Actions** có các lần chạy tự động (sự kiện *workflow_dispatch*) trong khoảng 10 phút sau 01:00, 04:00, 07:00, 10:00, 13:00, 16:00, 19:00, 22:00 giờ Việt Nam (lịch mặc định).
+
+**C6. Cài đặt trên dashboard** (nút **Cài đặt**, cần mã thao tác khi **Lưu**; ai cũng xem được):
+
+| Mục | Cách dùng |
+|---|---|
+| Phạm vi kiểm tra | Quốc gia / Ngôn ngữ / Thể loại: gõ để tìm (không cần dấu), bấm để chọn, `×` để bỏ; mỗi mục hiện số link. Để trống = không lọc. Dòng *Phạm vi này: khoảng N link* tính ngay theo lựa chọn; trên 3.000 link sẽ cảnh báo có thể phải nhiều lần chạy mới kiểm hết |
+| Mức kiểm tra | 1 → 4b, mỗi mức có giải thích |
+| Lịch tự chạy | Chạy mỗi 1/2/3/4/6/8/12/24 giờ, từ giờ nào; hoặc tắt |
+| Danh sách bỏ qua | Gõ **tên kênh** (`An Ninh`, `VTV1`), **tên miền** (`vtvprime.vn`) hoặc **link đầy đủ** → hiện ngay *Sẽ bỏ N link: …* → **Thêm**; mỗi dòng có ghi chú, nút xoá và *Đang bỏ …* (kết quả lần chạy gần nhất) |
+
+Trước khi lưu, cuối trang tóm tắt thay đổi (VD *Quốc gia: VN → VN, TH · Bỏ qua: thêm 1*). Lưu phạm vi / mức / danh sách bỏ qua →
+**tự chạy lại sau 1–2 phút** (chỉ đổi lịch thì không). Nếu người khác vừa lưu, trang báo và tải lại cấu hình mới nhất để bạn sửa lại.
 
 ---
 
@@ -126,14 +133,13 @@ Khoảng 1–2 phút sau mở <https://tienbeta.github.io/iptv_monitor/>.
 1. Google Sheet → **Chia sẻ** → thêm email MKT → quyền **Người chỉnh sửa (Editor)**.
 2. Gửi link dashboard: <https://tienbeta.github.io/iptv_monitor/>.
 3. Hướng dẫn MKT (3 dòng):
-   - Chỉ sửa **ô vàng B3–B6** trong `Config` và cột A, B của sheet `Exclude`. Sửa xong hệ thống **tự chạy lại sau 1–2 phút**.
-   - Bỏ kênh không cần theo dõi: sheet `Exclude`, cột A gõ **tên kênh** (VD `An Ninh`, `VTV1`), **tên miền** (VD `vtvprime.vn`)
-     hoặc **link đầy đủ**; không cần đúng hoa thường, dấu. Sau lần chạy, cột C **Đang bỏ** ghi rõ đã bỏ kênh nào —
-     xem lại để chắc không bỏ nhầm (VD `VTV` bỏ mọi kênh VTV và VTVcab).
-   - Muốn chạy ngay: menu **IPTV Monitor → Chạy ngay** (hoặc nút **Chạy ngay** trên dashboard), rồi xem ô **Trạng thái** (dòng 8). Đang ⏳ thì chưa bấm lại được — đợi ✓ Xong.
+   - Đổi phạm vi, mức kiểm tra, lịch, danh sách bỏ qua: dashboard → **Cài đặt** (mục C6). Sheet `Config` chỉ để xem.
+   - Bỏ kênh không cần theo dõi: **Cài đặt → Danh sách bỏ qua**, gõ tên kênh / tên miền / link; không cần đúng hoa thường, dấu.
+     Xem dòng *Sẽ bỏ …* để chắc không bỏ nhầm (VD `VTV` bỏ mọi kênh VTV và VTVcab).
+   - Muốn chạy ngay: nút **Chạy ngay** trên dashboard (hoặc menu **IPTV Monitor → Chạy ngay** trong Sheet), rồi xem trạng thái. Đang ⏳ thì chưa bấm lại được — đợi ✓ Xong.
    - Các mục khác trong menu nằm ở **Quản trị** — dành cho chủ Sheet, MKT không cần bấm.
    - Sheet `Streams` tự cập nhật theo lịch; lọc/sắp xếp thoải mái, nhưng sửa tay sẽ bị ghi đè.
-4. Người được phép bấm **Chạy ngay** / đổi **Cài đặt** (mức kiểm tra, lịch tự chạy) trên dashboard: gửi riêng cho họ **mã thao tác**
+4. Người được phép bấm **Chạy ngay** / lưu **Cài đặt** trên dashboard: gửi riêng cho họ **mã thao tác**
    (**IPTV Monitor → Quản trị → Đặt / đổi mã thao tác dashboard** — hộp này hiện *Mã hiện tại*; bấm Huỷ để đóng mà không đổi).
    Dashboard hỏi mã ở lần bấm đầu và có thể ghi nhớ trên máy đó. Người chỉ xem thì không cần mã.
    Mã **cố định** cho tới khi bạn đổi (chạy lại *Cài đặt ban đầu* cũng không đổi mã). Muốn mã dễ nhớ: cũng ở mục đó,
@@ -141,7 +147,8 @@ Khoảng 1–2 phút sau mở <https://tienbeta.github.io/iptv_monitor/>.
 
 > **Lưu ý bảo mật:** người có quyền Editor mở được Apps Script và xem được 2 token.
 > GitHub token chỉ có quyền chạy/huỷ workflow của repo này; bridge token chỉ đọc/ghi được chính Sheet này.
-> Mã thao tác chỉ cho phép chạy kiểm tra và đổi lịch trên dashboard; nhập sai 10 lần thì bị khoá 15 phút.
+> Mã thao tác cho phép chạy kiểm tra và đổi cấu hình trên dashboard; nhập sai 10 lần thì bị khoá 15 phút.
+> Cấu hình (kể cả ghi chú trong danh sách bỏ qua) ai mở dashboard cũng **xem** được.
 > Nếu một người rời team: **IPTV Monitor → Quản trị → Đặt / đổi mã thao tác dashboard**, tạo GitHub token mới (B4) và đổi bridge token
 > (xoá `BRIDGE_TOKEN` trong *Apps Script → Project Settings → Script Properties*, chạy lại **Cài đặt ban đầu**, cập nhật secret B3).
 
@@ -149,15 +156,16 @@ Khoảng 1–2 phút sau mở <https://tienbeta.github.io/iptv_monitor/>.
 
 ## E. Cập nhật lên bản mới (đã cài bản cũ)
 
-Bản này chuyển **lịch tự chạy từ cron của GitHub sang Apps Script** (để đổi được lịch trên dashboard) và thêm
-nút **Chạy ngay** + trạng thái trên dashboard. Làm **E1–E3 trước khi merge** code mới vào `main`
-— nếu merge trước thì trong lúc chờ sẽ không có lần tự chạy nào.
+Các bản gần đây chuyển **lịch tự chạy từ cron của GitHub sang Apps Script**, thêm **Chạy ngay** + trạng thái và
+đưa **toàn bộ cấu hình lên dashboard** (Sheet không còn ô cấu hình / sheet `Exclude`). Làm **E1–E3 trước khi merge**
+code mới vào `main` — nếu merge trước thì trong lúc chờ sẽ không có lần tự chạy nào.
 
 1. **E1.** Apps Script: xoá hết `Code.gs` → dán bản mới từ [`apps-script/Code.gs`](../apps-script/Code.gs) → **Save**.
 2. **E2.** Google Sheet: tải lại trang → **IPTV Monitor → Quản trị → Cài đặt ban đầu**
-   (Sheet cũ chưa có menu *Quản trị* thì chọn **IPTV Monitor → Cài đặt ban đầu**). Không mất cấu hình (B3–B6, Exclude);
-   bước này bật lịch tự chạy (mặc định mỗi 3 giờ từ 01:00, giống lịch cũ), tạo mã thao tác và chuyển `Config`
-   sang bố cục mới: bỏ ô tick B7, thêm dòng *Lịch tự chạy* / *Thông báo*, khối kết quả gọn lại (hiện lại sau lần chạy tới).
+   (Sheet cũ chưa có menu *Quản trị* thì chọn **IPTV Monitor → Cài đặt ban đầu**). **Không mất cấu hình:** giá trị ở B3–B6
+   và toàn bộ sheet `Exclude` (kể cả ghi chú) được chuyển vào Apps Script, rồi sheet `Exclude` bị xoá và `Config` thành
+   trang chỉ để xem. Bước này cũng bật lịch tự chạy (mặc định mỗi 3 giờ từ 01:00) và tạo mã thao tác.
+   (Quên bước này thì lần chạy / lần mở dashboard đầu tiên sau khi cập nhật cũng tự chuyển.)
 3. **E3.** Apps Script: **Deploy → Manage deployments** → bút chì → Version: **New version** → **Deploy** (URL giữ nguyên).
 4. **E4.** Merge code mới vào `main`.
 5. **E5.** Chạy một lần (menu **IPTV Monitor → Chạy ngay**) để dashboard nhận link điều khiển → thanh **Chạy ngay** xuất hiện.
@@ -172,7 +180,7 @@ nút **Chạy ngay** + trạng thái trên dashboard. Làm **E1–E3 trước kh
 |---|---|
 | Xem lịch sử chạy / lỗi | GitHub → tab **Actions**. Lỗi phía Sheet: Apps Script → **Executions** |
 | Cập nhật code Apps Script | Dán code mới → Save → **Deploy → Manage deployments** → bút chì → Version: **New version** → Deploy (URL giữ nguyên) |
-| Đổi mức kiểm tra | Dashboard → **Cài đặt** → *Mức kiểm tra* → **Lưu** (cần mã thao tác), hoặc ô B6 trong Sheet. Đổi xong tự chạy lại sau ~1–2 phút |
+| Đổi phạm vi / mức kiểm tra / danh sách bỏ qua | Dashboard → **Cài đặt** → sửa → **Lưu** (cần mã thao tác). Lưu xong tự chạy lại sau ~1–2 phút |
 | Đổi lịch tự chạy / tạm dừng | Dashboard → **Cài đặt** → chọn *Chạy mỗi* + *Bắt đầu từ*, hoặc bỏ tick *Tự động chạy* → **Lưu** (cần mã thao tác). Dừng hẳn: Actions → IPTV check → `···` → **Disable workflow** |
 | GitHub token hết hạn | Làm lại B4. Trong lúc hết hạn **không có lần tự chạy nào**; dashboard / ô Trạng thái báo “Không tự chạy được…” |
 | Đặt / đổi mã thao tác | **IPTV Monitor → Quản trị → Đặt / đổi mã thao tác dashboard** → xem *Mã hiện tại*, hoặc gõ mã mới → gửi mã mới; ai lưu mã cũ sẽ được hỏi lại |
@@ -189,8 +197,11 @@ nút **Chạy ngay** + trạng thái trên dashboard. Làm **E1–E3 trước kh
 | “Apps Script trả về không phải JSON … Who has access: Anyone” | Web app deploy sai quyền truy cập | Làm lại A5 với **Anyone** |
 | “Apps Script từ chối (load): …” / “unauthorized” | Token hoặc link web app trong GitHub không khớp với Sheet | Mở **IPTV Monitor → Quản trị → Xem bridge token** (có nút Copy và *Mã kiểm tra*) rồi so với dòng lỗi trong log: **(1)** “chưa có bridge token” hoặc *mã Sheet chờ* ≠ *Mã kiểm tra* trong menu → `SHEET_BRIDGE_URL` đang trỏ tới Apps Script khác: copy lại URL trong hộp thoại (hoặc Deploy → Manage deployments) vào secret. **(2)** *mã GitHub gửi* ≠ *Mã kiểm tra* → copy lại token vào `SHEET_BRIDGE_TOKEN`. Secret phải nằm ở tab **Actions** (không phải Codespaces / Dependabot) |
 | “chưa có sheet Config” | Chưa chạy **Cài đặt ban đầu** | Làm A4 |
-| Ô Thông báo (B9) báo “không tìm thấy workflow check.yml trên nhánh main” | Code chưa ở `main` | Làm B1 |
-| Ô Thông báo (B9) báo “GitHub token sai hoặc đã hết hạn” / “thiếu quyền” | Token hết hạn hoặc thiếu quyền Actions | Làm lại B4 |
+| Ô Thông báo (B5) báo “không tìm thấy workflow check.yml trên nhánh main” | Code chưa ở `main` | Làm B1 |
+| Ô Thông báo (B5) báo “GitHub token sai hoặc đã hết hạn” / “thiếu quyền” | Token hết hạn hoặc thiếu quyền Actions | Làm lại B4 |
+| Cài đặt: “Chưa tải được danh mục kênh” | `options.json` có sau lần chạy đầu tiên của bản mới | Chạy một lần; trong lúc chờ vẫn thêm được bằng mã (VD `VN`, `vie`, `news`) |
+| Cài đặt không có mục Phạm vi / Danh sách bỏ qua | Web app vẫn chạy version cũ | Làm E1–E3 (nhớ **New version**) |
+| Cài đặt: “Cấu hình vừa được đổi ở nơi khác” | Có người khác lưu trong lúc bạn đang sửa | Trang đã tải cấu hình mới nhất; sửa lại rồi Lưu |
 | Bước “Đăng dashboard” lỗi 403 | Workflow chưa có quyền ghi | Làm B2 |
 | Dashboard 404 | Chưa bật Pages hoặc chưa có lần chạy nào | Làm C2 rồi C4 |
 | Nhiều kênh VN “Bị chặn truy cập (có thể do giới hạn quốc gia)” | Máy kiểm tra của GitHub đặt ở Mỹ | Giới hạn đã biết; mở thử bằng VLC ở Việt Nam |

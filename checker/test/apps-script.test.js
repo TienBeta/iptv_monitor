@@ -13,6 +13,31 @@ function ready() {
   return { gas, token: gas.props.get('BRIDGE_TOKEN') };
 }
 
+// Settings are changed from the dashboard (doPost "settings" with the operator code).
+function saveSettings(gas, body) {
+  return gas.post({ action: 'settings', code: gas.props.get('DASHBOARD_CODE'), ...body });
+}
+
+// A Sheet set up by an older version: inputs in Config!B3:B6, an "Exclude" sheet,
+// no settings in Script Properties yet.
+function oldSheet({ countries = 'VN, TH', languages = 'vie', categories = '', level = '4a - Có hình hoặc tiếng', exclude = [] } = {}) {
+  const gas = loadAppsScript();
+  const ss = gas.ss;
+  const cfg = ss.insertSheet('Config', 0);
+  cfg.getRange('A1:C10').setValues([
+    ['IPTV MONITOR — CẤU HÌNH', '', ''], ['Mục', 'Giá trị', 'Hướng dẫn'],
+    ['Quốc gia', countries, ''], ['Ngôn ngữ', languages, ''], ['Thể loại', categories, ''], ['Mức kiểm tra', level, ''],
+    ['Lịch tự chạy', 'Mỗi 3 giờ', ''], ['Trạng thái', '✓ Xong lúc 10:02', 'Xem chi tiết trên GitHub'], ['Thông báo', 'x', ''],
+    ['LẦN CHẠY GẦN NHẤT', '', ''],
+  ]);
+  cfg.getRange('A11:B12').setValues([['Thời điểm', new gas.ctx.Date()], ['Nguồn dữ liệu', 'Bình thường']]);
+  cfg.getRange('A1:A30').protect().setDescription('Nhãn cấu hình');
+  const ex = ss.insertSheet('Exclude');
+  ex.getRange('A1:C1').setValues([['Bỏ qua', 'Ghi chú', 'Đang bỏ']]);
+  if (exclude.length) ex.getRange(2, 1, exclude.length, 3).setValues(exclude);
+  return gas;
+}
+
 const savePayload = (runAt = Date.UTC(2026, 8, 23, 3, 17)) => ({
   data: {
     header: ['url', 'title', 'status', 'failStreak', 'lastChecked'],
@@ -33,48 +58,60 @@ const savePayload = (runAt = Date.UTC(2026, 8, 23, 3, 17)) => ({
 });
 
 describe('Code.gs — cài đặt', () => {
-  test('setup tạo 4 sheet, token, trigger sửa; xoá sheet mặc định trống', () => {
+  test('setup tạo Config (chỉ xem) + Streams + _data, token, lịch; không còn sheet Exclude / trigger sửa', () => {
     const { gas, token } = ready();
-    assert.deepEqual(gas.ss.getSheets().map((s) => s.getName()), ['Config', 'Exclude', 'Streams', '_data']);
+    assert.deepEqual(gas.ss.getSheets().map((s) => s.getName()), ['Config', 'Streams', '_data']);
     assert.match(token, /^[0-9a-f]{64}$/);
     assert.equal(gas.sheet('_data').hidden, true);
-    assert.equal(gas.sheet('Config').getRange('B3').getValue(), 'VN');
-    assert.equal(gas.sheet('Config').getRange('A7').getValue(), 'Lịch tự chạy');
-    assert.equal(gas.sheet('Config').getRange('B7').getValue(), 'Mỗi 3 giờ (01:00, 04:00, 07:00, 10:00, 13:00, 16:00, 19:00, 22:00)');
-    assert.equal(gas.sheet('Config').getRange('A9').getValue(), 'Thông báo');
-    assert.equal(gas.sheet('Config').getRange('A10').getValue(), 'LẦN CHẠY GẦN NHẤT');
-    assert.equal(gas.triggers.filter((t) => t.handler === 'onConfigEdit').length, 1);
+    const cfg = gas.sheet('Config');
+    assert.deepEqual(cfg.getRange('A1:A5').getValues().map((r) => r[0]), ['IPTV MONITOR', 'Cấu hình', 'Lịch tự chạy', 'Trạng thái', 'Thông báo']);
+    assert.equal(cfg.getRange('B2').getValue(),
+      'Quốc gia: VN · Ngôn ngữ: tất cả · Thể loại: tất cả · Mức 3 - Tải được dữ liệu video · Bỏ qua: không');
+    assert.equal(cfg.getRange('C2').getValue(), 'Sửa trên dashboard: nút "Cài đặt"');
+    assert.equal(cfg.getRange('B3').getValue(), 'Mỗi 3 giờ (01:00, 04:00, 07:00, 10:00, 13:00, 16:00, 19:00, 22:00)');
+    assert.equal(cfg.getRange('A7').getValue(), 'LẦN CHẠY GẦN NHẤT');
+    assert.ok(cfg.getProtections('SHEET').some((p) => /Chỉ để xem/.test(p.getDescription())));
+    assert.equal(gas.triggers.filter((t) => t.handler === 'onConfigEdit').length, 0);
     assert.equal(gas.ss.tz, 'Asia/Ho_Chi_Minh');
   });
-  test('Sheet bố cục cũ (ô tick B7, tóm tắt từ dòng 10) → setup chuyển sang bố cục mới, giữ cấu hình', () => {
-    const { gas } = ready();
-    const sh = gas.sheet('Config');
-    sh.getRange('B3').setValue('VN, TH');
-    sh.getRange('A7:C7').setValues([['Chạy ngay', false, 'Đã gửi yêu cầu chạy lúc 10:00']]);
-    sh.getRange('A9').setValue('LẦN CHẠY GẦN NHẤT');
-    sh.getRange('A10:B12').setValues([['Thời điểm', new gas.ctx.Date()], ['Nguồn dữ liệu', 'Bình thường'], ['Mức kiểm tra', '3']]);
-    sh.getRange('B8').setValue('✓ Xong lúc 10:02');
-    sh.getRange('C8').setValue('Xem chi tiết trên GitHub');
+  test('Sheet cũ (B3:B6 + sheet Exclude) → chuyển cấu hình vào Apps Script, xoá Exclude, Config chỉ còn phần xem', () => {
+    const gas = oldSheet({ exclude: [['An Ninh', 'kênh an ninh', '2 link: An Ninh TV'], ['', '', 'cũ'], [' vtvprime.vn ', '', '']] });
+    gas.triggers.push({ handler: 'onConfigEdit', kind: 'edit', getHandlerFunction: () => 'onConfigEdit' });
     gas.ctx.setup();
-    assert.equal(sh.getRange('C8').getValue(), ''); // old GitHub link removed
-    assert.deepEqual(sh.getRange('A7:A10').getValues().map((r) => r[0]), ['Lịch tự chạy', 'Trạng thái', 'Thông báo', 'LẦN CHẠY GẦN NHẤT']);
-    assert.match(sh.getRange('B7').getValue(), /^Mỗi 3 giờ/);
-    assert.equal(sh.getRange('B8').getValue(), '✓ Xong lúc 10:02'); // status kept
-    assert.equal(sh.getRange('B9').getValue(), '');
-    assert.deepEqual(sh.getRange('A11:B12').getValues(), [['', ''], ['', '']]); // old summary gone
-    assert.equal(sh.getRange('B3').getValue(), 'VN, TH');
-    const descriptions = sh.getProtections('RANGE').map((p) => p.getDescription());
-    gas.ctx.setup();
-    assert.deepEqual(sh.getProtections('RANGE').map((p) => p.getDescription()), descriptions); // no duplicates
-    assert.ok(descriptions.includes('Lịch, trạng thái, thông báo (script tự ghi)'));
+    assert.deepEqual(gas.ss.getSheets().map((s) => s.getName()), ['Config', 'Streams', '_data']);
+    const c = gas.get({ action: 'status' }).config;
+    assert.deepEqual([c.countries, c.languages, c.categories, c.level], [['VN', 'TH'], ['vie'], [], '4a - Có hình hoặc tiếng']);
+    assert.deepEqual(c.exclude, [
+      { entry: 'An Ninh', note: 'kênh an ninh', report: '2 link: An Ninh TV' },
+      { entry: 'vtvprime.vn', note: '', report: '' },
+    ]);
+    const cfg = gas.sheet('Config');
+    assert.equal(cfg.getRange('A3').getValue(), 'Lịch tự chạy');
+    assert.equal(cfg.getRange('B4').getValue(), '✓ Xong lúc 10:02'); // status kept
+    assert.equal(cfg.getRange('C4').getValue(), ''); // old GitHub link gone
+    assert.match(cfg.getRange('B2').getValue(), /^Quốc gia: VN, TH · Ngôn ngữ: vie · Thể loại: tất cả · Mức 4a - Có hình hoặc tiếng · Bỏ qua: 2 mục$/);
+    assert.deepEqual(cfg.getRange('A8:B9').getValues(), [['', ''], ['', '']]); // old summary gone until the next run
+    assert.equal(cfg.getProtections('RANGE').length, 0); // old range warnings removed
+    assert.equal(gas.triggers.filter((t) => t.handler === 'onConfigEdit').length, 0);
+    gas.ctx.setup(); // again: nothing moves twice
+    assert.deepEqual(gas.get({ action: 'status' }).config.countries, ['VN', 'TH']);
   });
-  test('chạy setup lần 2 không ghi đè cấu hình, không tạo trigger/token mới', () => {
+  test('cập nhật code mà chưa chạy Cài đặt ban đầu → lần load đầu tiên tự chuyển cấu hình', () => {
+    const gas = oldSheet({ countries: 'TH', exclude: [['https://x/bad.m3u8', '', '']] });
+    gas.ss.insertSheet('_data');
+    gas.props.set('BRIDGE_TOKEN', 't'.repeat(64));
+    const res = gas.post({ token: 't'.repeat(64), action: 'load' });
+    assert.equal(res.config.countries, 'TH');
+    assert.deepEqual(res.exclude, ['https://x/bad.m3u8']);
+    assert.equal(gas.sheet('Exclude'), null);
+  });
+  test('chạy setup lần 2 không đổi cấu hình, không tạo trigger/token mới', () => {
     const { gas, token } = ready();
-    gas.sheet('Config').getRange('B3').setValue('TH');
+    assert.equal(saveSettings(gas, { scope: { countries: ['TH'] } }).ok, true);
     gas.ctx.setup();
-    assert.equal(gas.sheet('Config').getRange('B3').getValue(), 'TH');
+    assert.deepEqual(gas.get({ action: 'status' }).config.countries, ['TH']);
     assert.equal(gas.props.get('BRIDGE_TOKEN'), token);
-    assert.equal(gas.triggers.filter((t) => t.handler === 'onConfigEdit').length, 1);
+    assert.equal(gas.triggers.filter((t) => t.handler === 'autoRun').length, 1);
   });
 });
 
@@ -106,10 +143,12 @@ describe('Code.gs — web app (load / save)', () => {
     const { gas, token } = ready();
     assert.equal(gas.post({ token: ` ${token}\n`, action: 'load' }).ok, true);
   });
-  test('load trả cấu hình + danh sách loại trừ', () => {
+  test('load trả cấu hình + danh sách loại trừ (lưu trong Apps Script)', () => {
     const { gas, token } = ready();
-    gas.sheet('Config').getRange('B4').setValue('vie');
-    gas.sheet('Exclude').getRange('A2:B3').setValues([['https://x/bad.m3u8', 'hỏng'], ['  https://x/b2.m3u8 ', '']]);
+    saveSettings(gas, {
+      scope: { countries: ['VN'], languages: ['vie'], categories: [] },
+      exclude: [{ entry: 'https://x/bad.m3u8', note: 'hỏng' }, { entry: '  https://x/b2.m3u8 ', note: '' }],
+    });
     const res = gas.post({ token, action: 'load' });
     assert.equal(res.ok, true);
     assert.deepEqual(res.config, { countries: 'VN', languages: 'vie', categories: '', level: '3 - Tải được dữ liệu video' });
@@ -130,9 +169,9 @@ describe('Code.gs — web app (load / save)', () => {
     assert.ok(gas.sheet('Streams').getFilter(), 'filter kept');
 
     const config = gas.sheet('Config');
-    assert.ok(isDate(config.getRange('B11').getValue()));
-    assert.equal(config.getRange('A12').getValue(), 'Nguồn dữ liệu');
-    assert.equal(config.getRange('B13').getValue(), 2);
+    assert.ok(isDate(config.getRange('B8').getValue()));
+    assert.equal(config.getRange('A9').getValue(), 'Nguồn dữ liệu');
+    assert.equal(config.getRange('B10').getValue(), 2);
     assert.deepEqual(JSON.parse(gas.props.get('LAST_RUN')), { sourceCount: 2, configHash: 'abc123' });
 
     const loaded = gas.post({ token, action: 'load' });
@@ -153,16 +192,24 @@ describe('Code.gs — web app (load / save)', () => {
     assert.equal(gas.sheet('_data').rows().length, 2);
     assert.deepEqual(gas.sheet('Streams').getFilter().getColumnFilterCriteria(5), { status: 'Không hoạt động' });
   });
-  test('Exclude: tiêu đề 3 cột; save ghi cột "Đang bỏ" cạnh từng dòng, xoá kết quả cũ của dòng đã xoá', () => {
+  test('save lưu "đang bỏ" của từng mục bỏ qua → dashboard đọc được', () => {
     const { gas, token } = ready();
-    const ex = gas.sheet('Exclude');
-    assert.deepEqual(ex.getRange('A1:C1').getValues()[0],
-      ['Bỏ qua: tên kênh, mã kênh hoặc link (VD: An Ninh)', 'Ghi chú', 'Đang bỏ (tự cập nhật sau mỗi lần chạy)']);
-    assert.ok(ex.getProtections('RANGE').some((p) => p.getDescription() === 'Kết quả loại trừ (script tự ghi)'));
-    ex.getRange('A2:C4').setValues([['An Ninh', 'kênh an ninh', ''], ['', '', 'kết quả cũ'], ['  vtv  ', '', '']]);
-    gas.post({ token, action: 'save', ...savePayload(), exclude: [{ entry: 'An Ninh', text: '2 link: ANTV' }, { entry: 'vtv', text: '=7 link' }] });
-    assert.deepEqual(ex.getRange('C2:C4').getValues().map((r) => r[0]), ['2 link: ANTV', '', '=7 link']);
-    assert.equal(ex.getRange('B2').getValue(), 'kênh an ninh'); // notes untouched
+    saveSettings(gas, { exclude: [{ entry: 'An Ninh', note: 'kênh an ninh' }, { entry: 'vtv', note: '' }] });
+    gas.post({ token, action: 'save', ...savePayload(), exclude: [{ entry: 'An Ninh', text: '2 link: ANTV' }, { entry: 'vtv', text: '55 link: VTV1, …' }] });
+    assert.deepEqual(gas.get({ action: 'status' }).config.exclude, [
+      { entry: 'An Ninh', note: 'kênh an ninh', report: '2 link: ANTV' },
+      { entry: 'vtv', note: '', report: '55 link: VTV1, …' },
+    ]);
+  });
+  test('danh sách bỏ qua dài (300 mục, có dấu) vẫn lưu được dù mỗi giá trị Script Properties chỉ 9 kB', () => {
+    const { gas } = ready();
+    const lines = Array.from({ length: 300 }, (_, i) => ({ entry: `Kênh truyền hình địa phương số ${i}`, note: 'Ghi chú tiếng Việt có dấu '.repeat(4) }));
+    assert.equal(saveSettings(gas, { exclude: lines }).ok, true);
+    assert.equal(gas.get({ action: 'status' }).config.exclude.length, 300);
+    assert.ok(Number(gas.props.get('EXCLUDE_N')) > 1);
+    saveSettings(gas, { exclude: lines.slice(0, 2) }); // shorter: old chunks removed
+    assert.equal(gas.props.get('EXCLUDE_N'), '1');
+    assert.equal(gas.props.has('EXCLUDE_1'), false);
   });
   test('save 12,000 dòng (vượt 1,000 dòng mặc định của sheet)', () => {
     const { gas, token } = ready();
@@ -186,36 +233,35 @@ describe('Code.gs — Chạy ngay và tự chạy khi sửa cấu hình', () => 
     assert.equal(opts.method, 'post');
     assert.equal(opts.headers.Authorization, 'Bearer github_pat_test');
     assert.deepEqual(JSON.parse(opts.payload), { ref: 'main' });
-    assert.match(gas.sheet('Config').getRange('B9').getValue(), /^Đã gửi yêu cầu chạy/);
-    assert.equal(gas.sheet('Config').getRange('B8').getValue(), '⏳ Đang chờ GitHub bắt đầu chạy…');
+    assert.match(gas.sheet('Config').getRange('B5').getValue(), /^Đã gửi yêu cầu chạy/);
+    assert.equal(gas.sheet('Config').getRange('B4').getValue(), '⏳ Đang chờ GitHub bắt đầu chạy…');
   });
   test('chưa có GitHub token / token sai → thông báo rõ ràng', () => {
     const { gas } = ready();
     gas.ctx.runNow();
-    assert.match(gas.sheet('Config').getRange('B9').getValue(), /chưa nhập GitHub token/);
+    assert.match(gas.sheet('Config').getRange('B5').getValue(), /chưa nhập GitHub token/);
     gas.props.set('GITHUB_TOKEN', 'expired');
     gas.setFetchCode(401);
     gas.ctx.runNow();
-    assert.match(gas.sheet('Config').getRange('B9').getValue(), /sai hoặc đã hết hạn/);
+    assert.match(gas.sheet('Config').getRange('B5').getValue(), /sai hoặc đã hết hạn/);
   });
-  test('sửa ô cấu hình nhiều lần → chỉ 1 lần chạy hẹn sau ~1 phút', () => {
+  test('lưu cấu hình nhiều lần liền nhau trên dashboard → chỉ 1 lần chạy, hẹn sau ~1 phút', () => {
     const { gas } = ready();
     gas.props.set('GITHUB_TOKEN', 't');
-    gas.edit('Config', 'B3');
-    gas.edit('Config', 'B6');
-    gas.edit('Exclude', 'A2');
+    saveSettings(gas, { scope: { countries: ['TH'] } });
+    saveSettings(gas, { level: '1 - Link có phản hồi' });
+    saveSettings(gas, { exclude: [{ entry: 'An Ninh', note: '' }] });
     assert.equal(gas.triggers.filter((t) => t.handler === 'scheduledRun').length, 1);
     assert.equal(gas.fetches.length, 0);
     gas.ctx.scheduledRun();
     assert.equal(gas.fetches.filter((f) => f.opts.method === 'post').length, 1);
     assert.equal(gas.triggers.filter((t) => t.handler === 'scheduledRun').length, 0);
   });
-  test('sửa cột hướng dẫn, ô lịch / trạng thái / thông báo, khối kết quả, ghi chú / "Đang bỏ" của Exclude → không chạy lại', () => {
+  test('trigger sửa Sheet của bản cũ (nếu còn) chỉ tự gỡ, không chạy lại', () => {
     const { gas } = ready();
-    gas.edit('Config', 'C3');
-    for (const a1 of ['B7', 'B8', 'B9', 'B12']) gas.edit('Config', a1);
-    gas.edit('Exclude', 'B2');
-    gas.edit('Exclude', 'C2');
+    gas.triggers.push({ handler: 'onConfigEdit', kind: 'edit', getHandlerFunction: () => 'onConfigEdit' });
+    gas.edit('Config', 'B2');
+    assert.equal(gas.triggers.filter((t) => t.handler === 'onConfigEdit').length, 0);
     assert.equal(gas.triggers.filter((t) => t.handler === 'scheduledRun').length, 0);
   });
 });
@@ -223,9 +269,9 @@ describe('Code.gs — Chạy ngay và tự chạy khi sửa cấu hình', () => 
 describe('Code.gs — ô "Trạng thái" và khoá nút Chạy ngay', () => {
   const tick = (gas) => gas.ctx.runNow();
   const watchers = (gas) => gas.triggers.filter((t) => t.handler === 'watchRun').length;
-  const progress = (gas) => gas.sheet('Config').getRange('B8').getValue();
-  const link = (gas) => gas.sheet('Config').links['8,3'];
-  const color = (gas) => gas.sheet('Config').backgrounds['8,2'];
+  const progress = (gas) => gas.sheet('Config').getRange('B4').getValue();
+  const link = (gas) => gas.sheet('Config').links['4,3'];
+  const color = (gas) => gas.sheet('Config').backgrounds['4,2'];
   const posts = (gas) => gas.fetches.filter((f) => f.opts.method === 'post').length;
   function started() {
     const { gas } = ready();
@@ -237,7 +283,7 @@ describe('Code.gs — ô "Trạng thái" và khoá nút Chạy ngay', () => {
 
   test('setup: ô Trạng thái = "Sẵn sàng"', () => {
     const { gas } = ready();
-    assert.equal(gas.sheet('Config').getRange('A8').getValue(), 'Trạng thái');
+    assert.equal(gas.sheet('Config').getRange('A4').getValue(), 'Trạng thái');
     assert.equal(progress(gas), 'Sẵn sàng');
   });
   test('sau khi gửi: "⏳ Đang chờ" (nền vàng), không có link GitHub, 1 trigger theo dõi', () => {
@@ -253,7 +299,7 @@ describe('Code.gs — ô "Trạng thái" và khoá nút Chạy ngay', () => {
     tick(gas);
     tick(gas);
     assert.equal(posts(gas), 1);
-    assert.match(gas.sheet('Config').getRange('B9').getValue(), /^Đang có một lần chạy/);
+    assert.match(gas.sheet('Config').getRange('B5').getValue(), /^Đang có một lần chạy/);
     assert.equal(watchers(gas), 1);
   });
   test('đang có lần chạy (kể cả chạy theo lịch) → bị chặn, hiện "Đang chạy" và theo dõi lần đó', () => {
@@ -262,7 +308,7 @@ describe('Code.gs — ô "Trạng thái" và khoá nút Chạy ngay', () => {
     gas.setRuns([run({ id: 77, event: 'schedule', status: 'in_progress', run_started_at: new Date(Date.now() - 60000).toISOString() })]);
     tick(gas);
     assert.equal(posts(gas), 0);
-    assert.match(gas.sheet('Config').getRange('B9').getValue(), /^Đang có một lần chạy/);
+    assert.match(gas.sheet('Config').getRange('B5').getValue(), /^Đang có một lần chạy/);
     assert.match(progress(gas), /^⏳ Đang chạy… \(bắt đầu \d\d:\d\d, đã 1 phút\)$/);
     assert.equal(JSON.parse(gas.props.get('RUN_WATCH')).runId, 77);
     gas.setRuns([run({ id: 77, status: 'completed', conclusion: 'success', updated_at: new Date().toISOString() })]);
@@ -275,10 +321,10 @@ describe('Code.gs — ô "Trạng thái" và khoá nút Chạy ngay', () => {
     const { gas } = ready();
     gas.props.set('GITHUB_TOKEN', 't');
     gas.setRuns([run({ status: 'in_progress', run_started_at: new Date().toISOString() })]);
-    gas.edit('Config', 'B3');
+    saveSettings(gas, { scope: { countries: ['TH'] } });
     gas.ctx.scheduledRun();
     assert.equal(posts(gas), 1);
-    assert.equal(gas.sheet('Config').getRange('B9').getValue(), 'Cấu hình đã đổi — sẽ chạy lại ngay sau lần chạy hiện tại.');
+    assert.equal(gas.sheet('Config').getRange('B5').getValue(), 'Cấu hình đã đổi — sẽ chạy lại ngay sau lần chạy hiện tại.');
   });
   test('đang chạy → "Đang chạy… (bắt đầu hh:mm, đã N phút)"', () => {
     const gas = started();
@@ -348,7 +394,7 @@ describe('Code.gs — lịch tự chạy', () => {
     at(gas, vn(4, 3));
     gas.ctx.autoRun();
     assert.equal(posts(gas), 1);
-    assert.equal(gas.sheet('Config').getRange('B9').getValue(), 'Tự chạy theo lịch (lượt 04:00).');
+    assert.equal(gas.sheet('Config').getRange('B5').getValue(), 'Tự chạy theo lịch (lượt 04:00).');
     assert.equal(gas.get({ action: 'status' }).run.phase, 'queued');
     at(gas, vn(4, 13));
     gas.ctx.autoRun();
@@ -374,7 +420,7 @@ describe('Code.gs — lịch tự chạy', () => {
     at(gas, vn(4, 5));
     gas.ctx.autoRun();
     assert.equal(posts(gas), 0);
-    assert.equal(gas.sheet('Config').getRange('B9').getValue(), 'Bỏ qua lượt tự chạy 04:00 vì lần chạy trước chưa xong.');
+    assert.equal(gas.sheet('Config').getRange('B5').getValue(), 'Bỏ qua lượt tự chạy 04:00 vì lần chạy trước chưa xong.');
   });
   test('GitHub token hết hạn → báo lỗi ở ô Trạng thái và trên dashboard', () => {
     const gas = scheduled();
@@ -384,7 +430,7 @@ describe('Code.gs — lịch tự chạy', () => {
     const { run } = gas.get({ action: 'status' });
     assert.equal(run.phase, 'error');
     assert.match(run.message, /^Không tự chạy được lượt 04:00: GitHub token sai hoặc đã hết hạn/);
-    assert.match(gas.sheet('Config').getRange('B8').getValue(), /^✗ Không tự chạy được lượt 04:00/);
+    assert.match(gas.sheet('Config').getRange('B4').getValue(), /^✗ Không tự chạy được lượt 04:00/);
   });
   test('tắt tự chạy → không chạy; next = null', () => {
     const gas = scheduled();
@@ -393,7 +439,7 @@ describe('Code.gs — lịch tự chạy', () => {
     const res = gas.post({ action: 'schedule', code: 'ABCD-EFGH', schedule: { enabled: false, everyHours: 3, startHour: 1 } });
     assert.equal(res.ok, true);
     assert.equal(res.status.schedule.next, null);
-    assert.match(gas.sheet('Config').getRange('B7').getValue(), /^Đang tắt/);
+    assert.match(gas.sheet('Config').getRange('B3').getValue(), /^Đang tắt/);
     at(gas, vn(4, 5));
     gas.ctx.autoRun();
     assert.equal(posts(gas), 0);
@@ -406,8 +452,8 @@ describe('Code.gs — lịch tự chạy', () => {
     assert.equal(res.ok, true);
     assert.deepEqual(res.status.schedule.hours, [1, 7, 13, 19]);
     assert.equal(res.status.schedule.next, vn(13));
-    assert.match(gas.sheet('Config').getRange('B9').getValue(), /^Lịch tự chạy: mỗi 6 giờ \(01:00, 07:00, 13:00, 19:00\)/);
-    assert.equal(gas.sheet('Config').getRange('B7').getValue(), 'Mỗi 6 giờ (01:00, 07:00, 13:00, 19:00)');
+    assert.match(gas.sheet('Config').getRange('B5').getValue(), /^Lịch tự chạy: mỗi 6 giờ \(01:00, 07:00, 13:00, 19:00\)/);
+    assert.equal(gas.sheet('Config').getRange('B3').getValue(), 'Mỗi 6 giờ (01:00, 07:00, 13:00, 19:00)');
     gas.ctx.autoRun();
     assert.equal(posts(gas), 0);
     at(gas, vn(13, 4));
@@ -465,7 +511,7 @@ describe('Code.gs — dashboard (trạng thái, Chạy ngay, mã thao tác)', ()
     assert.equal(res.ok, true);
     assert.equal(res.status.run.phase, 'queued');
     assert.equal(posts(gas), 1);
-    assert.match(gas.sheet('Config').getRange('B9').getValue(), /^Đã gửi yêu cầu chạy từ dashboard lúc/);
+    assert.match(gas.sheet('Config').getRange('B5').getValue(), /^Đã gửi yêu cầu chạy từ dashboard lúc/);
   });
   test('Chạy ngay khi đang có lần chạy → từ chối, không gửi thêm', () => {
     const { gas, code } = withCode();
@@ -616,7 +662,7 @@ describe('Code.gs — dashboard (trạng thái, Chạy ngay, mã thao tác)', ()
   });
 });
 
-describe('Code.gs — dashboard đổi mức kiểm tra (settings)', () => {
+describe('Code.gs — dashboard đổi cấu hình (settings)', () => {
   const vn = (h, m = 0) => Date.UTC(2026, 8, 24, h - 7, m);
   const L4B = '4b - Giải mã được hình';
   const L3 = '3 - Tải được dữ liệu video';
@@ -627,43 +673,95 @@ describe('Code.gs — dashboard đổi mức kiểm tra (settings)', () => {
     return { gas, code: gas.props.get('DASHBOARD_CODE') };
   }
   const reruns = (gas) => gas.triggers.filter((t) => t.handler === 'scheduledRun').length;
+  const config = (gas) => gas.get({ action: 'status' }).config;
 
-  test('trạng thái có mức kiểm tra hiện tại (ô B6) và danh sách mức', () => {
+  test('trạng thái có toàn bộ cấu hình (ai cũng xem được) + danh sách mức', () => {
     const { gas } = withCode();
     const s = gas.get({ action: 'status' });
-    assert.equal(s.config.level, L3);
+    assert.deepEqual(s.config, { countries: ['VN'], languages: [], categories: [], level: L3, exclude: [], rev: 1 });
     assert.equal(s.levelOptions.length, 5);
     assert.equal(s.levelOptions[4], L4B);
   });
-  test('đổi mức → ghi ô B6, hẹn chạy lại ~1 phút như khi sửa trong Sheet', () => {
+  test('đổi mức → lưu, hẹn chạy lại ~1 phút; ô Cấu hình trong Sheet cập nhật', () => {
     const { gas, code } = withCode();
     const res = gas.post({ action: 'settings', code, level: L4B, schedule: same });
     assert.equal(res.ok, true);
-    assert.match(res.message, /tự chạy lại với mức kiểm tra mới/);
-    assert.equal(gas.sheet('Config').getRange('B6').getValue(), L4B);
+    assert.equal(res.message, 'Đã lưu mức kiểm tra. Sẽ tự chạy lại sau khoảng 1–2 phút.');
     assert.equal(res.status.config.level, L4B);
+    assert.equal(res.status.config.rev, 2);
     assert.equal(reruns(gas), 1);
-    assert.match(gas.sheet('Config').getRange('B9').getValue(), /^Mức kiểm tra đổi thành "4b - Giải mã được hình" từ dashboard/);
+    assert.match(gas.sheet('Config').getRange('B2').getValue(), /· Mức 4b - Giải mã được hình ·/);
+    assert.match(gas.sheet('Config').getRange('B5').getValue(), /^Cấu hình đổi từ dashboard lúc \d\d:\d\d \(mức kiểm tra\) — sẽ tự chạy lại/);
     gas.ctx.scheduledRun();
     assert.equal(gas.fetches.filter((f) => f.opts.method === 'post').length, 1);
   });
-  test('mức không hợp lệ, hoặc lịch sai kèm mức đúng → không lưu gì', () => {
+  test('đổi phạm vi: mã quốc gia viết thường / GB đều được; bỏ trùng', () => {
     const { gas, code } = withCode();
-    assert.equal(gas.post({ action: 'settings', code, level: '5 - Siêu', schedule: same }).error, 'invalid');
-    const bad = gas.post({ action: 'settings', code, level: L4B, schedule: { enabled: true, everyHours: 5, startHour: 1 } });
-    assert.equal(bad.error, 'invalid');
-    assert.equal(gas.sheet('Config').getRange('B6').getValue(), L3);
+    const res = gas.post({ action: 'settings', code, scope: { countries: ['vn', 'th', 'GB', 'VN'], languages: ['VIE'], categories: ['news'] } });
+    assert.equal(res.ok, true);
+    assert.deepEqual([res.status.config.countries, res.status.config.languages, res.status.config.categories], [['VN', 'TH', 'UK'], ['vie'], ['news']]);
+    const load = gas.post({ token: gas.props.get('BRIDGE_TOKEN'), action: 'load' });
+    assert.deepEqual(load.config, { countries: 'VN, TH, UK', languages: 'vie', categories: 'news', level: L3 });
+    assert.equal(reruns(gas), 1);
+  });
+  test('để trống quốc gia = tất cả quốc gia', () => {
+    const { gas, code } = withCode();
+    gas.post({ action: 'settings', code, scope: { countries: [], languages: [], categories: [] } });
+    assert.deepEqual(config(gas).countries, []);
+    assert.match(gas.sheet('Config').getRange('B2').getValue(), /^Quốc gia: tất cả ·/);
+  });
+  test('danh sách bỏ qua: thêm / sửa ghi chú / xoá; bỏ dòng trống và trùng', () => {
+    const { gas, code } = withCode();
+    gas.post({ action: 'settings', code, exclude: [{ entry: ' An Ninh ', note: 'a' }, { entry: '', note: 'x' }, { entry: 'An Ninh', note: 'b' }, { entry: 'VTV1', note: '' }] });
+    assert.deepEqual(config(gas).exclude.map((e) => [e.entry, e.note]), [['An Ninh', 'a'], ['VTV1', '']]);
+    assert.equal(gas.post({ token: gas.props.get('BRIDGE_TOKEN'), action: 'load' }).exclude.join('|'), 'An Ninh|VTV1');
+    gas.post({ action: 'settings', code, exclude: [{ entry: 'VTV1', note: 'giữ VTV10' }] });
+    assert.deepEqual(config(gas).exclude, [{ entry: 'VTV1', note: 'giữ VTV10', report: '' }]);
+    assert.match(gas.sheet('Config').getRange('B2').getValue(), /Bỏ qua: 1 mục$/);
+  });
+  test('giá trị không hợp lệ → không lưu gì (kể cả phần hợp lệ gửi kèm)', () => {
+    const { gas, code } = withCode();
+    for (const body of [
+      { level: '5 - Siêu', schedule: same },
+      { level: L4B, schedule: { enabled: true, everyHours: 5, startHour: 1 } },
+      { level: L4B, scope: { countries: ['Việt Nam'] } },
+      { scope: { languages: ['vi'] } },
+      { exclude: [{ entry: 'x'.repeat(201), note: '' }] },
+      { exclude: Array.from({ length: 301 }, (_, i) => ({ entry: `K${i}`, note: '' })) },
+    ]) {
+      assert.equal(gas.post({ action: 'settings', code, ...body }).error, 'invalid', JSON.stringify(body).slice(0, 60));
+    }
+    assert.equal(config(gas).level, L3);
+    assert.deepEqual(config(gas).countries, ['VN']);
+    assert.equal(config(gas).rev, 1);
     assert.equal(reruns(gas), 0);
   });
-  test('sai mã → từ chối, không đổi mức', () => {
+  test('người khác vừa lưu (rev cũ) → từ chối, trả cấu hình mới nhất', () => {
+    const { gas, code } = withCode();
+    const rev = config(gas).rev;
+    gas.post({ action: 'settings', code, rev, scope: { countries: ['TH'] } }); // someone else
+    const res = gas.post({ action: 'settings', code, rev, level: L4B });
+    assert.deepEqual([res.ok, res.error], [false, 'conflict']);
+    assert.deepEqual(res.status.config.countries, ['TH']);
+    assert.equal(config(gas).level, L3);
+    assert.equal(gas.post({ action: 'settings', code, rev: res.status.config.rev, level: L4B }).ok, true);
+  });
+  test('chỉ đổi lịch → không chạy lại', () => {
+    const { gas, code } = withCode();
+    const res = gas.post({ action: 'settings', code, schedule: { enabled: true, everyHours: 6, startHour: 7 } });
+    assert.equal(res.message, 'Đã lưu lịch tự chạy.');
+    assert.equal(reruns(gas), 0);
+  });
+  test('sai mã → từ chối, không đổi gì', () => {
     const { gas } = withCode();
-    assert.equal(gas.post({ action: 'settings', code: 'WRONG-1', level: L4B }).error, 'bad_code');
-    assert.equal(gas.sheet('Config').getRange('B6').getValue(), L3);
+    assert.equal(gas.post({ action: 'settings', code: 'WRONG-1', level: L4B, scope: { countries: ['TH'] } }).error, 'bad_code');
+    assert.equal(config(gas).level, L3);
+    assert.deepEqual(config(gas).countries, ['VN']);
   });
   test('không đổi gì → không chạy lại, không làm mất lượt tự chạy sắp tới', () => {
     const { gas, code } = withCode();
     gas.ctx.Date.now = () => vn(4, 2); // lượt 04:00 chưa được trigger chạy
-    const res = gas.post({ action: 'settings', code, level: L3, schedule: same });
+    const res = gas.post({ action: 'settings', code, level: L3, schedule: same, scope: { countries: ['VN'] }, exclude: [] });
     assert.equal(res.message, 'Không có gì thay đổi.');
     assert.equal(reruns(gas), 0);
     gas.ctx.Date.now = () => vn(4, 5);

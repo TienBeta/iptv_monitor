@@ -39,6 +39,8 @@
   const REFRESH_MS = 10 * 60 * 1000;
 
   const $ = (id) => document.getElementById(id);
+  // "?v=…" the publish step adds to app.js; reused for match.js so both come from the same deploy.
+  const ASSET_QUERY = (document.currentScript && new URL(document.currentScript.src).search) || '';
   const collator = new Intl.Collator('vi', { sensitivity: 'base' });
   const timeFmt = new Intl.DateTimeFormat('en-GB', {
     timeZone: 'Asia/Ho_Chi_Minh', day: '2-digit', month: '2-digit', year: 'numeric',
@@ -734,6 +736,10 @@
     if (res) toast(res.message || (res.ok ? 'Đã gửi yêu cầu chạy.' : 'Không gửi được yêu cầu chạy.'));
   }
 
+  // ---------- Settings page: scope, level, schedule, exclude list ----------
+  // Everything is edited in a draft and saved in one request; Apps Script
+  // checks it all and refuses a stale revision (someone else saved meanwhile).
+
   // Short, plain explanation of each level (keys: the part before " - ").
   const LEVEL_HINTS = {
     1: 'Chỉ xem link có trả lời. Nhanh nhất, nhưng dễ báo "hoạt động" dù không xem được.',
@@ -743,6 +749,15 @@
     '4b': 'Giải mã được khung hình. Chắc chắn nhất, chạy lâu nhất.',
   };
   const levelKey = (label) => String(label || '').split(' - ')[0];
+  const BIG_SCOPE = 3000; // links: above this one run may not check everything
+  const SCOPE_KINDS = [
+    { key: 'countries', picker: 'pick-countries', fix: (v) => (v.toUpperCase() === 'GB' ? 'UK' : v.toUpperCase()) },
+    { key: 'languages', picker: 'pick-languages', fix: (v) => v.toLowerCase() },
+    { key: 'categories', picker: 'pick-categories', fix: (v) => v.toLowerCase() },
+  ];
+  const set = { options: null, triedOptions: false, match: null, base: null, draft: null, pickers: {}, rows: [] };
+  const clone = (v) => JSON.parse(JSON.stringify(v));
+  const sameList = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
 
   function slotHours(every, start) {
     const hours = [];
@@ -750,32 +765,378 @@
     return hours;
   }
 
-  function openSchedule() {
-    const s = ctl.status;
-    if (!s) return;
-    const every = $('sch-every');
-    every.replaceChildren(...(s.everyHoursOptions || [1, 2, 3, 4, 6, 8, 12, 24])
-      .map((n) => new Option(n === 24 ? '24 giờ (mỗi ngày 1 lần)' : `${n} giờ`, String(n))));
-    const start = $('sch-start');
-    start.replaceChildren(...Array.from({ length: 24 }, (_, h) => new Option(`${pad2(h)}:00`, String(h))));
-    $('sch-enabled').checked = s.schedule.enabled;
-    every.value = String(s.schedule.everyHours);
-    start.value = String(s.schedule.startHour);
-    // Older Apps Script (no level in the status): only the schedule can change here.
+  // options.json (the iptv-org catalog, written by the checker) and the matcher shared with it.
+  async function loadCatalog() {
+    if (!set.match) {
+      try { set.match = await import(`./match.js${ASSET_QUERY}`); } catch { set.match = null; }
+    }
+    if (set.triedOptions) return;
+    set.triedOptions = true;
+    try {
+      const res = await fetch(`options.json?v=${Date.now()}`, { cache: 'no-store' });
+      if (res.ok) set.options = await res.json();
+    } catch { set.options = null; }
+    if (!set.options) return;
+    const o = set.options;
+    for (const [kind, key] of [['countries', 'code'], ['languages', 'code'], ['categories', 'id']]) {
+      o[`${kind}Index`] = new Map(o[kind].map((x, i) => [x[key], i]));
+    }
+    // matcher fields per link; the words are computed on first use
+    set.rows = o.links.map(([, , , title, channel, name, host, altNames]) => ({
+      fields: { url: host ? `https://${host}/` : '', title, channel, name, altNames }, words: null,
+    }));
+  }
+
+  function pickerItems(kind) {
+    const o = set.options;
+    if (!o) return [];
+    const list = o[kind].map((x) => (kind === 'countries'
+      ? { value: x.code, label: `${x.flag ? `${x.flag} ` : ''}${x.name}`, n: x.n }
+      : kind === 'languages' ? { value: x.code, label: x.name, hint: x.code, n: x.n }
+        : { value: x.id, label: x.name, hint: x.id, n: x.n }));
+    return list.sort((a, b) => b.n - a.n || collator.compare(a.label, b.label));
+  }
+
+  // Multi-select with search, for the three scope lists.
+  function makePicker(root, kind, items, fix, onChange) {
+    const fold = (v) => (set.match ? set.match.foldText(v) : String(v).toLowerCase());
+    const byValue = new Map(items.map((i) => [i.value, { ...i, search: fold(`${i.label} ${i.value}`) }]));
+    const codeRe = new RegExp(root.dataset.code);
+    let selected = [];
+    let shown = [];
+    let active = -1;
+    root.replaceChildren();
+    const id = `${root.id}-input`;
+    const label = el('label', 'field-label', root.dataset.label);
+    label.htmlFor = id;
+    const box = el('div', 'picker-box');
+    const chips = el('span', 'picker-chips');
+    const input = el('input', 'picker-input');
+    Object.assign(input, { id, type: 'text', autocomplete: 'off', spellcheck: false, placeholder: root.dataset.placeholder });
+    input.setAttribute('role', 'combobox');
+    input.setAttribute('aria-expanded', 'false');
+    const list = el('ul', 'picker-list');
+    list.id = `${root.id}-list`;
+    list.setAttribute('role', 'listbox');
+    list.hidden = true;
+    input.setAttribute('aria-controls', list.id);
+    box.append(chips, input);
+    root.append(label, box, list);
+    box.addEventListener('mousedown', (e) => { if (e.target === box || e.target === chips) { e.preventDefault(); input.focus(); } });
+
+    const itemOf = (v) => byValue.get(v) || { value: v, label: v, n: 0, search: fold(v) };
+    function renderChips() {
+      chips.replaceChildren(...selected.map((v) => {
+        const it = itemOf(v);
+        const chip = el('span', 'chip-sel', it.label);
+        const x = el('button', 'chip-x');
+        x.type = 'button';
+        x.setAttribute('aria-label', `Bỏ ${it.label}`);
+        x.textContent = '×';
+        x.addEventListener('click', () => toggle(v));
+        chip.append(x);
+        return chip;
+      }));
+      if (!selected.length) chips.append(el('span', 'picker-empty', root.dataset.empty));
+    }
+    function renderList() {
+      const q = fold(input.value);
+      shown = [...byValue.values()].filter((i) => !q || i.search.includes(q)).slice(0, 60);
+      if (active >= shown.length) active = shown.length - 1;
+      list.replaceChildren(...shown.map((it, i) => {
+        const li = el('li', `picker-option${i === active ? ' is-active' : ''}`);
+        li.setAttribute('role', 'option');
+        li.setAttribute('aria-selected', String(selected.includes(it.value)));
+        li.append(el('span', 'picker-check', selected.includes(it.value) ? '✓' : ''), el('span', 'picker-label', it.label));
+        if (it.hint) li.append(el('span', 'picker-hint', it.hint));
+        li.append(el('span', 'picker-n', `${numFmt.format(it.n)} link`));
+        li.addEventListener('mousedown', (e) => { e.preventDefault(); toggle(it.value); });
+        return li;
+      }));
+      const typed = input.value.trim();
+      if (!shown.length) {
+        list.append(el('li', 'picker-none', codeRe.test(typed) ? `Nhấn Enter để thêm mã “${fix(typed)}”` : 'Không tìm thấy'));
+      }
+      list.hidden = false;
+      input.setAttribute('aria-expanded', 'true');
+    }
+    function close() {
+      list.hidden = true;
+      input.setAttribute('aria-expanded', 'false');
+      active = -1;
+    }
+    function toggle(v) {
+      selected = selected.includes(v) ? selected.filter((x) => x !== v) : [...selected, v];
+      renderChips();
+      if (!list.hidden) renderList();
+      onChange(selected.slice());
+    }
+    input.addEventListener('focus', renderList);
+    input.addEventListener('input', () => { active = 0; renderList(); });
+    input.addEventListener('blur', () => setTimeout(close, 120));
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (list.hidden) renderList();
+        active = Math.max(0, Math.min(shown.length - 1, active + (e.key === 'ArrowDown' ? 1 : -1)));
+        renderList();
+      } else if (e.key === 'Enter') {
+        e.preventDefault(); // never submits the settings form
+        const typed = input.value.trim();
+        if (shown[active]) toggle(shown[active].value);
+        else if (!shown.length && codeRe.test(typed)) toggle(fix(typed));
+        input.value = '';
+        renderList();
+      } else if (e.key === 'Escape' && !list.hidden) {
+        e.preventDefault();
+        e.stopPropagation(); // close the list, not the dialog
+        close();
+      } else if (e.key === 'Backspace' && !input.value && selected.length) {
+        toggle(selected[selected.length - 1]);
+      }
+    });
+    return {
+      set(values) { selected = values.slice(); renderChips(); },
+    };
+  }
+
+  // Links of the catalog inside a scope, as indexes into set.rows.
+  function scopeRows(draft) {
+    const o = set.options;
+    if (!o) return null;
+    const sets = SCOPE_KINDS.map(({ key }) => new Set(draft[key].map((v) => o[`${key}Index`].get(v)).filter((i) => i !== undefined)));
+    const wanted = SCOPE_KINDS.map(({ key }) => draft[key].length > 0);
+    const noFilter = !wanted.some(Boolean);
+    const out = [];
+    o.links.forEach(([c, l, k, , channel], i) => {
+      if (!channel) {
+        if (noFilter) out.push(i); // links without a channel are only kept when nothing is filtered
+        return;
+      }
+      if (wanted[0] && !sets[0].has(c)) return;
+      if (wanted[1] && !l.some((x) => sets[1].has(x))) return;
+      if (wanted[2] && !k.some((x) => sets[2].has(x))) return;
+      out.push(i);
+    });
+    return out;
+  }
+
+  const rowMatches = (rule, i) => {
+    const row = set.rows[i];
+    if (!rule.link) row.words ||= set.match.nameWords(row.fields);
+    return set.match.ruleMatches(rule, row.fields, row.words);
+  };
+
+  // What one exclude line removes: in the catalog for names / domains, in the
+  // current results for full links (the catalog has no full links).
+  function previewRule(entry, rows) {
+    const m = set.match;
+    if (!m) return null;
+    const rule = m.makeRule(entry);
+    const hit = { tooShort: rule.tooShort, link: rule.link, count: 0, names: [] };
+    if (rule.tooShort) return hit;
+    const note = (fields) => {
+      hit.count++;
+      const name = m.matchName(fields);
+      if (hit.names.length < 4 && !hit.names.includes(name)) hit.names.push(name);
+    };
+    if (rule.link || !rows) {
+      for (const r of state.data?.streams || []) {
+        const fields = { url: r.url, title: r.title, channel: r.channel };
+        if (m.ruleMatches(rule, fields)) note(fields);
+      }
+    } else {
+      for (const i of rows) if (rowMatches(rule, i)) note(set.rows[i].fields);
+    }
+    return hit;
+  }
+
+  function renderEstimate() {
+    const box = $('scope-estimate');
+    const rows = scopeRows(set.draft);
+    box.classList.remove('is-warn');
+    if (!rows || !set.match) {
+      box.textContent = '';
+      return;
+    }
+    const rules = set.draft.exclude.map((e) => set.match.makeRule(e.entry)).filter((r) => !r.tooShort && !r.link);
+    const kept = rows.filter((i) => !rules.some((r) => rowMatches(r, i))).length;
+    const baseRows = scopeRows(set.base);
+    const now = state.data ? state.data.total : null;
+    let text = `Phạm vi này: khoảng ${numFmt.format(kept)} link`;
+    if (rows.length !== kept) text += ` (đã trừ ${numFmt.format(rows.length - kept)} link bỏ qua)`;
+    if (now !== null && baseRows && !sameScope(set.base, set.draft)) text += ` · hiện tại ${numFmt.format(now)} link`;
+    if (kept > BIG_SCOPE) {
+      text += '. Phạm vi lớn: một lần chạy có thể không kiểm hết, phần còn lại sẽ được kiểm ở các lần sau.';
+      box.classList.add('is-warn');
+    }
+    box.textContent = text;
+  }
+  const sameScope = (a, b) => SCOPE_KINDS.every(({ key }) => sameList(a[key], b[key]));
+
+  function renderExcludeList() {
+    const ul = $('ex-list');
+    const rows = scopeRows(set.draft);
+    ul.replaceChildren(...set.draft.exclude.map((e, i) => {
+      const li = el('li', 'exclude-item');
+      const main = el('div', 'exclude-main');
+      main.append(el('span', 'exclude-entry', e.entry));
+      const note = el('input', 'exclude-note');
+      Object.assign(note, { type: 'text', value: e.note || '', maxLength: 200, placeholder: 'Ghi chú' });
+      note.setAttribute('aria-label', `Ghi chú cho ${e.entry}`);
+      note.addEventListener('input', () => { set.draft.exclude[i].note = note.value; renderSettingsChanges(); });
+      main.append(note);
+      let status;
+      if (e.isNew) {
+        const hit = previewRule(e.entry, rows);
+        status = `Mới — ${hit ? `sẽ bỏ: ${set.match.reportText(hit)}` : 'áp dụng khi lưu'}`;
+      } else {
+        status = e.report ? `Đang bỏ: ${e.report}` : 'Chưa có kết quả (có sau lần chạy tới)';
+      }
+      const del = el('button', 'icon-btn icon-btn-sm');
+      del.type = 'button';
+      del.title = 'Xoá khỏi danh sách';
+      del.setAttribute('aria-label', `Xoá ${e.entry}`);
+      del.append(icon('M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z'));
+      del.addEventListener('click', () => { set.draft.exclude.splice(i, 1); refreshSettings(); });
+      li.append(main, el('p', `exclude-status${e.isNew ? ' is-new' : ''}`, status), del);
+      return li;
+    }));
+    if (!set.draft.exclude.length) ul.append(el('li', 'exclude-none', 'Chưa bỏ qua kênh nào.'));
+  }
+
+  function renderExcludePreview() {
+    const entry = $('ex-entry').value.trim();
+    const out = $('ex-preview');
+    $('ex-add').disabled = !entry;
+    out.classList.remove('is-warn');
+    if (!entry) {
+      out.textContent = '';
+      return;
+    }
+    if (set.draft.exclude.some((e) => e.entry === entry)) {
+      out.textContent = 'Đã có trong danh sách.';
+      $('ex-add').disabled = true;
+      return;
+    }
+    const hit = previewRule(entry, scopeRows(set.draft));
+    if (!hit) {
+      out.textContent = '';
+      return;
+    }
+    out.textContent = hit.tooShort || !hit.count ? set.match.reportText(hit) : `Sẽ bỏ ${set.match.reportText(hit)}`;
+    if (hit.tooShort || !hit.count) out.classList.add('is-warn');
+  }
+
+  function addExclude() {
+    const entry = $('ex-entry').value.trim();
+    if (!entry || set.draft.exclude.some((e) => e.entry === entry)) return;
+    set.draft.exclude.push({ entry, note: $('ex-note').value.trim(), isNew: true });
+    $('ex-entry').value = '';
+    $('ex-note').value = '';
+    refreshSettings();
+    $('ex-entry').focus();
+  }
+
+  function describeChanges() {
+    const b = set.base;
+    const d = set.draft;
+    const parts = [];
+    const text = (v, all) => (v.length ? v.join(', ') : all);
+    const names = { countries: ['Quốc gia', 'tất cả'], languages: ['Ngôn ngữ', 'mọi ngôn ngữ'], categories: ['Thể loại', 'mọi thể loại'] };
+    for (const { key } of SCOPE_KINDS) {
+      if (!sameList(b[key], d[key])) parts.push(`${names[key][0]}: ${text(b[key], names[key][1])} → ${text(d[key], names[key][1])}`);
+    }
+    if (b.level !== d.level) parts.push(`Mức kiểm tra: ${levelKey(b.level)} → ${levelKey(d.level)}`);
+    const before = b.exclude.map((e) => e.entry);
+    const after = d.exclude.map((e) => e.entry);
+    const added = after.filter((x) => !before.includes(x)).length;
+    const removed = before.filter((x) => !after.includes(x)).length;
+    const notes = d.exclude.some((e) => { const o = b.exclude.find((x) => x.entry === e.entry); return o && (o.note || '') !== (e.note || ''); });
+    if (added || removed) parts.push(`Bỏ qua: ${[added && `thêm ${added}`, removed && `xoá ${removed}`].filter(Boolean).join(', ')}`);
+    else if (notes) parts.push('Ghi chú bỏ qua');
+    if (JSON.stringify(b.schedule) !== JSON.stringify(d.schedule)) parts.push('Lịch tự chạy');
+    const rerun = !sameScope(b, d) || b.level !== d.level || !sameList(before, after);
+    return { parts, rerun };
+  }
+
+  function renderSettingsChanges() {
+    const { parts, rerun } = describeChanges();
+    $('settings-changes').textContent = parts.length
+      ? `Sẽ lưu: ${parts.join(' · ')}.${rerun ? ' Lưu xong, hệ thống tự chạy lại sau khoảng 1–2 phút.' : ''}`
+      : 'Chưa có thay đổi.';
+    $('sch-save').disabled = !parts.length;
+  }
+
+  function refreshSettings() {
+    renderEstimate();
+    renderExcludeList();
+    renderExcludePreview();
+    renderSettingsChanges();
+  }
+
+  function readScheduleForm() {
+    return { enabled: $('sch-enabled').checked, everyHours: Number($('sch-every').value), startHour: Number($('sch-start').value) };
+  }
+
+  // Draft from the status the page has (config + schedule).
+  function fillSettings(s) {
+    const c = s.config || {};
+    set.base = {
+      countries: c.countries || [], languages: c.languages || [], categories: c.categories || [],
+      level: c.level || '', exclude: (c.exclude || []).map((e) => ({ entry: e.entry, note: e.note || '', report: e.report || '' })),
+      schedule: { enabled: s.schedule.enabled, everyHours: s.schedule.everyHours, startHour: s.schedule.startHour },
+      rev: c.rev,
+    };
+    set.draft = clone(set.base);
+    for (const { key, picker, fix } of SCOPE_KINDS) {
+      set.pickers[key] = makePicker($(picker), key, pickerItems(key), fix, (values) => { set.draft[key] = values; refreshSettings(); });
+      set.pickers[key].set(set.draft[key]);
+    }
+    // Older Apps Script (no revision in the status): only level and schedule can be saved here.
+    const full = c.rev !== undefined;
+    $('scope-section').hidden = !full;
+    $('exclude-section').hidden = !full;
+    $('scope-missing').hidden = !full || !!set.options;
     const levels = s.levelOptions || [];
     $('level-section').hidden = !levels.length;
     $('set-level').replaceChildren(...levels.map((l) => new Option(l, l)));
-    if (levels.length) $('set-level').value = s.config?.level || levels[2];
-    showFormError('sch-error', '');
+    if (levels.length) $('set-level').value = set.draft.level || levels[2];
+    set.draft.level = $('set-level').value;
+    set.base.level ||= set.draft.level;
+    const every = $('sch-every');
+    every.replaceChildren(...(s.everyHoursOptions || [1, 2, 3, 4, 6, 8, 12, 24])
+      .map((n) => new Option(n === 24 ? '24 giờ (mỗi ngày 1 lần)' : `${n} giờ`, String(n))));
+    $('sch-start').replaceChildren(...Array.from({ length: 24 }, (_, h) => new Option(`${pad2(h)}:00`, String(h))));
+    $('sch-enabled').checked = set.draft.schedule.enabled;
+    every.value = String(set.draft.schedule.everyHours);
+    $('sch-start').value = String(set.draft.schedule.startHour);
+    $('ex-entry').value = '';
+    $('ex-note').value = '';
     updateSchedulePreview();
     updateLevelHint();
+    refreshSettings();
+  }
+
+  async function openSettings() {
+    const s = ctl.status;
+    if (!s) return;
+    const btn = $('schedule-open');
+    btn.disabled = true;
+    await loadCatalog();
+    btn.disabled = false;
+    showFormError('sch-error', '');
+    fillSettings(ctl.status);
     $('schedule-dialog').showModal();
   }
 
   function updateLevelHint() {
     const level = $('set-level').value;
     $('level-hint').textContent = LEVEL_HINTS[levelKey(level)] || '';
-    $('level-note').hidden = !ctl.status?.config || level === ctl.status.config.level;
+    if (set.draft) {
+      set.draft.level = level;
+      renderSettingsChanges();
+    }
   }
 
   function updateSchedulePreview() {
@@ -785,37 +1146,60 @@
     $('sch-start').disabled = !enabled || every === 1;
     $('sch-preview').textContent = enabled
       ? `Các giờ chạy mỗi ngày: ${slotHours(every, Number($('sch-start').value)).map((h) => `${pad2(h)}:00`).join(', ')}`
-      : 'Tự chạy đang tắt — chỉ chạy khi bấm Chạy ngay hoặc khi sửa cấu hình trong Sheet.';
+      : 'Tự chạy đang tắt — chỉ chạy khi bấm Chạy ngay hoặc khi đổi cấu hình.';
+    if (set.draft) {
+      set.draft.schedule = readScheduleForm();
+      renderSettingsChanges();
+    }
   }
 
-  async function saveSchedule(e) {
+  async function saveSettings(e) {
     e.preventDefault();
+    if (e.submitter && e.submitter.id !== 'sch-save') return; // Enter in a text box
+    if (!describeChanges().parts.length) return;
     const save = $('sch-save');
     save.disabled = true;
     save.textContent = 'Đang lưu…';
     showFormError('sch-error', '');
-    const withLevel = !$('level-section').hidden;
+    const d = set.draft;
+    const full = !$('scope-section').hidden;
     const res = await control({
-      action: withLevel ? 'settings' : 'schedule',
-      ...(withLevel ? { level: $('set-level').value } : {}),
-      schedule: { enabled: $('sch-enabled').checked, everyHours: Number($('sch-every').value), startHour: Number($('sch-start').value) },
+      action: 'settings',
+      rev: set.base.rev,
+      level: d.level,
+      schedule: d.schedule,
+      ...(full ? {
+        scope: { countries: d.countries, languages: d.languages, categories: d.categories },
+        exclude: d.exclude.map(({ entry, note }) => ({ entry, note })),
+      } : {}),
     });
-    save.disabled = false;
     save.textContent = 'Lưu';
-    if (!res) return;
+    if (!res) {
+      renderSettingsChanges();
+      return;
+    }
     if (res.ok) {
       $('schedule-dialog').close();
       toast(res.message || 'Đã lưu');
+    } else if (res.error === 'conflict' && res.status) {
+      fillSettings(res.status); // start again from what is saved now
+      showFormError('sch-error', res.message);
     } else {
+      renderSettingsChanges();
       showFormError('sch-error', res.message || 'Không lưu được, thử lại sau.');
     }
   }
 
   $('run-now').addEventListener('click', runNow);
-  $('schedule-open').addEventListener('click', openSchedule);
-  $('schedule-form').addEventListener('submit', saveSchedule);
+  $('schedule-open').addEventListener('click', openSettings);
+  $('schedule-form').addEventListener('submit', saveSettings);
   ['sch-enabled', 'sch-every', 'sch-start'].forEach((id) => $(id).addEventListener('change', updateSchedulePreview));
   $('set-level').addEventListener('change', updateLevelHint);
+  $('ex-entry').addEventListener('input', renderExcludePreview);
+  $('ex-add').addEventListener('click', addExclude);
+  ['ex-entry', 'ex-note'].forEach((id) => $(id).addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); addExclude(); }
+  }));
   $('code-form').addEventListener('submit', (e) => {
     e.preventDefault();
     const code = $('code-input').value.trim();

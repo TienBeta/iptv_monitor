@@ -2,7 +2,7 @@
 
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
-import { buildList, configHash, countryOf, excludeReport, excludeRules, foldText, normalizeConfig, parseLevel, qualityOf, wordsOf } from '../source.js';
+import { buildList, buildOptions, configHash, countryOf, excludeReport, excludeRules, foldText, normalizeConfig, parseLevel, qualityOf, wordsOf } from '../source.js';
 
 const source = {
   channels: [
@@ -118,8 +118,9 @@ describe('buildList', () => {
     const rules = excludeRules(['An Ninh', 'VTV', 'TV', 'Không có kênh này', 'https://x/khong-co.m3u8']);
     buildList(withNews, vn, rules);
     assert.deepEqual(excludeReport(rules), [
-      { entry: 'An Ninh', text: '2 link: ANTV' },
-      { entry: 'VTV', text: '6 link: VTV1.vn, VTV3.vn' },
+      // rows that leave the list: ANTV has a backup link in the same feed → 1
+      { entry: 'An Ninh', text: '1 link: ANTV' },
+      { entry: 'VTV', text: '3 link: VTV1.vn, VTV3.vn' }, // VTV1 HD + SD, VTV3 HD
       { entry: 'TV', text: 'Chưa dùng: cần ít nhất 3 chữ hoặc số' },
       { entry: 'Không có kênh này', text: 'Không khớp kênh nào' },
       { entry: 'https://x/khong-co.m3u8', text: 'Không khớp link nào (link phải giống hệt)' },
@@ -161,6 +162,26 @@ describe('buildList', () => {
     assert.equal(s.country, 'VN');
     assert.equal(s.countryName, 'Việt Nam');
     assert.equal(s.flag, '🇻🇳');
+  });
+});
+
+describe('options.json (danh mục cho trang Cài đặt)', () => {
+  const o = buildOptions({ ...withNews, languages: [{ code: 'tha', name: 'Thai' }], categories: [{ id: 'news', name: 'News' }] });
+  test('quốc gia / ngôn ngữ / thể loại có tên tiếng Việt và số link', () => {
+    const vnEntry = o.countries.find((c) => c.code === 'VN');
+    assert.deepEqual(vnEntry, { code: 'VN', name: 'Việt Nam', flag: '🇻🇳', n: 5 }); // VTV1 ×2 feeds, VTV3, ANTV, Đồng Tháp
+    assert.equal(o.languages.find((l) => l.code === 'vie').name, 'Tiếng Việt');
+    assert.equal(o.categories.find((c) => c.id === 'news').name, 'Tin tức');
+    assert.equal(o.countries.reduce((n, c) => n + c.n, 0) + o.links.filter((r) => r[0] === -1).length, o.links.length);
+  });
+  test('mỗi link một dòng: quốc gia, ngôn ngữ, thể loại, tên, mã kênh, tên kênh, tên miền', () => {
+    const antv = o.links.find((r) => r[4] === 'AnNinhTV.vn');
+    assert.equal(o.countries[antv[0]].code, 'VN');
+    assert.deepEqual(antv.slice(3), ['ANTV', 'AnNinhTV.vn', 'ANTV', 'liveh12.vtvprime.vn', ['An Ninh Truyền Hình']]);
+    assert.deepEqual(antv[2].map((i) => o.categories[i].id), ['news']);
+    const unknown = o.links.find((r) => r[3] === 'Unknown');
+    assert.equal(unknown[0], -1); // no channel: only in the "no filter" scope
+    assert.equal(o.links.length, buildList(withNews, normalizeConfig({})).length);
   });
 });
 

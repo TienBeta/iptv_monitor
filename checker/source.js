@@ -3,7 +3,8 @@
 // URLs and keep one best URL per channel+feed.
 
 import { createHash } from 'node:crypto';
-import { sleep } from './util.js';
+import { makeRule, matchName, nameWords, reportText, ruleMatches } from '../site/match.js';
+import { hostOf, sleep } from './util.js';
 
 export const API_BASE = 'https://iptv-org.github.io/api';
 
@@ -21,13 +22,17 @@ async function fetchJson(url) {
 }
 
 export async function fetchSource(base = API_BASE) {
-  const [streams, channels, feeds, countries] = await Promise.all(
-    ['streams', 'channels', 'feeds', 'countries'].map((name) => fetchJson(`${base}/${name}.json`)),
-  );
+  const optional = (name) => fetchJson(`${base}/${name}.json`).catch(() => []); // names for the dashboard only
+  const [streams, channels, feeds, countries, languages, categories] = await Promise.all([
+    ...['streams', 'channels', 'feeds', 'countries'].map((name) => fetchJson(`${base}/${name}.json`)),
+    optional('languages'),
+    optional('categories'),
+  ]);
   if (!Array.isArray(streams) || streams.length === 0) throw new Error('streams.json rỗng hoặc sai định dạng');
   if (!Array.isArray(channels) || channels.length === 0) throw new Error('channels.json rỗng hoặc sai định dạng');
   if (!Array.isArray(feeds)) throw new Error('feeds.json sai định dạng');
-  return { streams, channels, feeds, countries: Array.isArray(countries) ? countries : [] };
+  const list = (v) => (Array.isArray(v) ? v : []);
+  return { streams, channels, feeds, countries: list(countries), languages: list(languages), categories: list(categories) };
 }
 
 // ---- Config from the Sheet ----
@@ -98,41 +103,8 @@ function better(a, b) {
 }
 
 // ---------------------------------------------------------------- Exclude
-// Each line of the Sheet "Exclude" (column A):
-// - a full link ("…://…") removes exactly that link;
-// - text removes every link whose name or channel ID has it at the start of a
-//   word, ignoring case, accents, spaces and punctuation: "an ninh" / "anninh"
-//   match AnNinhTV.vn and "An Ninh TV", "dong thap" matches "Đồng Tháp TV1",
-//   "VTV" matches VTV1 but not "Lao SV TV" (words: lao, sv, tv);
-// - text with a "." or "/" and no spaces ("vtvprime.vn", "AnNinhTV.vn") is also
-//   looked for in the link. Plain text is not: most VN links are on vtvprime.vn,
-//   so "VTV" would otherwise remove nearly every channel.
-// Text with fewer than MIN_EXCLUDE_TEXT letters/digits is ignored ("TV").
-export const MIN_EXCLUDE_TEXT = 3;
-
-export function foldText(value) {
-  return String(value ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/[đĐ]/g, 'd').toLowerCase().replace(/[^a-z0-9]/g, '');
-}
-
-const isLink = (text) => /^[a-z][a-z0-9+.-]*:\/\//i.test(text);
-
-// "AnNinhTV.vn" → ["an", "ninh", "tv", "vn"]; "Đồng Tháp TV1" → ["dong", "thap", "tv1"]
-export function wordsOf(value) {
-  return String(value ?? '').replace(/(\p{Ll})(\p{Lu})/gu, '$1 $2').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/[đĐ]/g, 'd').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-}
-
-// `compact` (folded, no spaces) starts at a word and runs over the next words.
-function startsAtWord(words, compact) {
-  for (let i = 0; i < words.length; i++) {
-    let joined = '';
-    for (let j = i; j < words.length && joined.length < compact.length; j++) joined += words[j];
-    // "vtv1" matches VTV1 / VTV1 HD, not VTV10: a number must end where the text ends
-    if (joined.startsWith(compact) && !(/\d$/.test(compact) && /\d/.test(joined.charAt(compact.length)))) return true;
-  }
-  return false;
-}
+// The matching rules live in site/match.js, shared with the dashboard preview.
+export { MIN_EXCLUDE_TEXT, foldText, wordsOf } from '../site/match.js';
 
 export function excludeRules(entries) {
   const rules = [];
@@ -141,51 +113,33 @@ export function excludeRules(entries) {
     const entry = String(raw ?? '').trim();
     if (!entry || seen.has(entry)) continue;
     seen.add(entry);
-    const link = isLink(entry);
-    const folded = link ? '' : foldText(entry);
-    const inLink = !link && /[./]/.test(entry) && !/\s/.test(entry) ? entry.toLowerCase() : '';
-    rules.push({ entry, link, folded, inLink, tooShort: !link && folded.length < MIN_EXCLUDE_TEXT, count: 0, names: [] });
+    rules.push({ ...makeRule(entry), count: 0, names: [], keys: new Set() });
   }
   return rules;
 }
 
-// True when a rule removes the stream; every matching rule counts it (for the report).
+// True when a rule removes the stream; every matching rule counts it (for the
+// report). `fields.key` (channel@feed) makes the count "rows that leave the list",
+// not candidate links: a channel with a backup link still counts once.
 export function applyExclude(rules, fields) {
   let hit = false;
-  let folded = null;
+  let words = null;
   for (const rule of rules) {
     if (rule.tooShort) continue;
-    let match;
-    if (rule.link) {
-      match = fields.url === rule.entry;
-    } else {
-      folded ||= [fields.title, fields.channel, fields.name, ...(fields.altNames || [])].map(wordsOf);
-      match = folded.some((words) => startsAtWord(words, rule.folded))
-        || (!!rule.inLink && String(fields.url || '').toLowerCase().includes(rule.inLink));
-    }
-    if (match) {
-      hit = true;
-      rule.count++;
-      // channels, not link titles, so an unexpected match ("VTV" → ANTV on vtvprime.vn) is visible
-      const name = fields.name || fields.channel || fields.title || fields.url;
-      if (rule.names.length < 4 && !rule.names.includes(name)) rule.names.push(name);
-    }
+    if (!rule.link) words ||= nameWords(fields);
+    if (!ruleMatches(rule, fields, words)) continue;
+    hit = true;
+    if (!fields.key || !rule.keys.has(fields.key)) rule.count++;
+    if (fields.key) rule.keys.add(fields.key);
+    const name = matchName(fields);
+    if (rule.names.length < 4 && !rule.names.includes(name)) rule.names.push(name);
   }
   return hit;
 }
 
-// What each line removes, written to column C of "Exclude" after every run.
+// What each line removes, shown next to it after every run.
 export function excludeReport(rules) {
-  return rules.map((r) => {
-    let text;
-    if (r.tooShort) text = `Chưa dùng: cần ít nhất ${MIN_EXCLUDE_TEXT} chữ hoặc số`;
-    else if (!r.count) text = r.link ? 'Không khớp link nào (link phải giống hệt)' : 'Không khớp kênh nào';
-    else {
-      const shown = r.names.slice(0, 3);
-      text = `${r.count} link: ${shown.join(', ')}${r.names.length > 3 ? ', …' : ''}`;
-    }
-    return { entry: r.entry, text };
-  });
+  return rules.map((r) => ({ entry: r.entry, text: reportText(r) }));
 }
 
 /**
@@ -211,7 +165,7 @@ export function buildList(source, config, exclude = new Set()) {
     if (!s.channel) {
       // No metadata: can't be filtered or grouped, so only kept when nothing is filtered.
       if (noFilter) {
-        if (applyExclude(rules, { url, title: s.title })) {
+        if (applyExclude(rules, { url, title: s.title, key: url })) {
           excluded.add(url);
           return;
         }
@@ -229,7 +183,8 @@ export function buildList(source, config, exclude = new Set()) {
     }
     if (config.categories.length && !channel?.categories?.some((c) => config.categories.includes(c))) return;
     // Checked inside the scope, so the report counts only links the Sheet would list.
-    if (applyExclude(rules, { url, title: s.title, channel: s.channel, name: channel?.name, altNames: channel?.alt_names })) {
+    const feedKey = `${s.channel}@${s.feed ?? ''}`;
+    if (applyExclude(rules, { url, title: s.title, channel: s.channel, name: channel?.name, altNames: channel?.alt_names, key: feedKey })) {
       excluded.add(url);
       return;
     }
@@ -258,4 +213,63 @@ export function buildList(source, config, exclude = new Set()) {
   };
 
   return [...best.values()].sort((a, b) => a.index - b.index).concat(withoutChannel).map(toItem);
+}
+
+// ---------------------------------------------------------------- options.json
+// The catalog for the dashboard settings: what can be picked (with Vietnamese
+// names and link counts) and a small index of every link, so the page can
+// count a scope and preview exclude lines without the 20 MB iptv-org API.
+// Index rows: [countryIdx | -1, [languageIdx], [categoryIdx], title, channel ID,
+// channel name, host, altNames?] — indexes into the three lists, which keep
+// their first-seen order (the page sorts for display).
+
+const CATEGORY_NAMES = {
+  general: 'Tổng hợp', news: 'Tin tức', entertainment: 'Giải trí', religious: 'Tôn giáo', music: 'Âm nhạc',
+  movies: 'Phim', series: 'Phim bộ', sports: 'Thể thao', kids: 'Thiếu nhi', documentary: 'Tài liệu',
+  comedy: 'Hài', education: 'Giáo dục', culture: 'Văn hoá', legislative: 'Quốc hội, chính phủ',
+  animation: 'Hoạt hình', lifestyle: 'Đời sống', classic: 'Kinh điển', shop: 'Mua sắm', outdoor: 'Ngoài trời',
+  business: 'Kinh doanh', family: 'Gia đình', travel: 'Du lịch', cooking: 'Nấu ăn', public: 'Công cộng',
+  auto: 'Ô tô, xe', science: 'Khoa học', weather: 'Thời tiết', relax: 'Thư giãn', interactive: 'Tương tác',
+};
+const VI_LANGUAGES = new Intl.DisplayNames(['vi'], { type: 'language' });
+
+function languageName(code, apiNames) {
+  let name = '';
+  try {
+    name = VI_LANGUAGES.of(code) || '';
+  } catch {
+    // not a code Intl knows
+  }
+  if (!name || name === code || name === 'root') name = apiNames.get(code) || code;
+  return name;
+}
+
+export function buildOptions(source) {
+  const all = buildList(source, normalizeConfig({}));
+  const feeds = new Map(source.feeds.map((f) => [`${f.channel}@${f.id}`, f]));
+  const channels = new Map(source.channels.map((c) => [c.id, c]));
+  const langNames = new Map((source.languages || []).map((l) => [l.code, l.name]));
+  const catNames = new Map((source.categories || []).map((c) => [c.id, c.name]));
+  const lists = { countries: [], languages: [], categories: [] };
+  const index = { countries: new Map(), languages: new Map(), categories: new Map() };
+  const add = (kind, key, make) => {
+    if (!index[kind].has(key)) {
+      index[kind].set(key, lists[kind].length);
+      lists[kind].push({ ...make(), n: 0 });
+    }
+    const i = index[kind].get(key);
+    lists[kind][i].n++;
+    return i;
+  };
+  const links = all.map((s) => {
+    const channel = channels.get(s.channel);
+    const feed = feeds.get(`${s.channel}@${s.feed}`);
+    const c = s.country ? add('countries', s.country, () => ({ code: s.country, name: s.countryName, flag: s.flag })) : -1;
+    const l = (feed?.languages || []).map((code) => add('languages', code, () => ({ code, name: languageName(code, langNames) })));
+    const k = (channel?.categories || []).map((id) => add('categories', id, () => ({ id, name: CATEGORY_NAMES[id] || catNames.get(id) || id })));
+    const row = [c, l, k, s.title, s.channel, channel?.name || '', hostOf(s.url) || ''];
+    if (channel?.alt_names?.length) row.push(channel.alt_names);
+    return row;
+  });
+  return { ...lists, links };
 }

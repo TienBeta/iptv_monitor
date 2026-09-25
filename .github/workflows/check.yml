@@ -67,10 +67,17 @@ jobs:
           cp -r site/. public/
           # Pages lets browsers cache files for 10 minutes: version the CSS/JS
           # links so a new index.html never runs with an old cached app.js/style.css.
-          v=$(cat site/app.js site/style.css | sha256sum | cut -c1-10)
+          v=$(cat site/app.js site/style.css site/match.js | sha256sum | cut -c1-10)
           sed -i -E "s/(href|src)=\"(style\.css|app\.js)\"/\1=\"\2?v=${v}\"/" public/index.html
           grep -q "app.js?v=${v}" public/index.html && grep -q "style.css?v=${v}" public/index.html
           cp dist/results.json public/
+          # options.json (catalog for the dashboard settings) is only rebuilt when the
+          # iptv-org source loaded; otherwise keep the one already published.
+          if [ -f dist/options.json ]; then
+            cp dist/options.json public/
+          elif git fetch -q --depth 1 origin gh-pages 2>/dev/null; then
+            git show FETCH_HEAD:options.json > public/options.json 2>/dev/null || rm -f public/options.json
+          fi
           touch public/.nojekyll
           cd public
           git init -q -b gh-pages

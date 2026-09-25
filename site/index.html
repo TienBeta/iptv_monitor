@@ -115,30 +115,59 @@
       </p>
     </aside>
   </main>
-  <dialog id="schedule-dialog" class="dialog" aria-labelledby="schedule-title">
-    <form id="schedule-form" method="dialog">
-      <h2 id="schedule-title" class="dialog-title">Cài đặt kiểm tra</h2>
-      <fieldset id="level-section" class="dialog-section">
-        <legend class="section-title">Mức kiểm tra</legend>
-        <select id="set-level" class="field-select" aria-label="Mức kiểm tra"></select>
-        <p id="level-hint" class="field-hint"></p>
-        <p id="level-note" class="field-hint level-note" hidden>Lưu xong, hệ thống tự chạy lại với mức mới sau khoảng 1–2 phút.</p>
-      </fieldset>
-      <fieldset class="dialog-section">
-        <legend class="section-title">Lịch tự chạy</legend>
-        <label class="check-row"><input id="sch-enabled" type="checkbox"> Tự động chạy kiểm tra theo lịch</label>
-        <div class="field-grid">
-          <label class="field"><span class="field-label">Chạy mỗi</span><select id="sch-every"></select></label>
-          <label class="field"><span class="field-label">Bắt đầu từ</span><select id="sch-start"></select></label>
-        </div>
-        <p id="sch-preview" class="field-hint"></p>
-        <p class="field-hint">Giờ Việt Nam. Mỗi lượt bắt đầu trong khoảng 10 phút sau giờ hẹn; nếu lần chạy trước chưa xong thì bỏ qua lượt đó.</p>
-      </fieldset>
-      <p id="sch-error" class="form-error" role="alert" hidden></p>
-      <div class="dialog-actions">
-        <button class="text-btn" type="button" data-close>Huỷ</button>
-        <button id="sch-save" class="btn btn-primary" type="submit">Lưu</button>
+  <dialog id="schedule-dialog" class="dialog dialog-wide" aria-labelledby="schedule-title">
+    <form id="schedule-form" method="dialog" class="dialog-frame">
+      <header class="dialog-head">
+        <h2 id="schedule-title" class="dialog-title">Cài đặt kiểm tra</h2>
+        <button class="icon-btn" type="button" data-close aria-label="Đóng">
+          <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </header>
+      <div class="dialog-body">
+        <fieldset id="scope-section" class="dialog-section">
+          <legend class="section-title">Phạm vi kiểm tra</legend>
+          <p class="field-hint">Để trống một mục = không lọc theo mục đó. Chọn nhiều giá trị trong một mục = lấy link khớp một trong số đó; giữa các mục là “và”.</p>
+          <div class="picker" id="pick-countries" data-label="Quốc gia" data-empty="Tất cả quốc gia" data-placeholder="Tìm quốc gia…" data-code="^[A-Za-z]{2}$"></div>
+          <div class="picker" id="pick-languages" data-label="Ngôn ngữ" data-empty="Mọi ngôn ngữ" data-placeholder="Tìm ngôn ngữ…" data-code="^[A-Za-z]{3}$"></div>
+          <div class="picker" id="pick-categories" data-label="Thể loại" data-empty="Mọi thể loại" data-placeholder="Tìm thể loại…" data-code="^[A-Za-z][A-Za-z0-9-]{1,30}$"></div>
+          <p id="scope-estimate" class="scope-estimate" aria-live="polite"></p>
+          <p id="scope-missing" class="field-hint" hidden>Chưa tải được danh mục kênh (có sau lần chạy đầu tiên của bản mới). Vẫn thêm được bằng mã: gõ mã rồi Enter (VD quốc gia <b>VN</b>, ngôn ngữ <b>vie</b>, thể loại <b>news</b>).</p>
+        </fieldset>
+        <fieldset id="level-section" class="dialog-section">
+          <legend class="section-title">Mức kiểm tra</legend>
+          <select id="set-level" class="field-select" aria-label="Mức kiểm tra"></select>
+          <p id="level-hint" class="field-hint"></p>
+        </fieldset>
+        <fieldset class="dialog-section">
+          <legend class="section-title">Lịch tự chạy</legend>
+          <label class="check-row"><input id="sch-enabled" type="checkbox"> Tự động chạy kiểm tra theo lịch</label>
+          <div class="field-grid">
+            <label class="field"><span class="field-label">Chạy mỗi</span><select id="sch-every"></select></label>
+            <label class="field"><span class="field-label">Bắt đầu từ</span><select id="sch-start"></select></label>
+          </div>
+          <p id="sch-preview" class="field-hint"></p>
+          <p class="field-hint">Giờ Việt Nam. Mỗi lượt bắt đầu trong khoảng 10 phút sau giờ hẹn; nếu lần chạy trước chưa xong thì bỏ qua lượt đó.</p>
+        </fieldset>
+        <fieldset id="exclude-section" class="dialog-section">
+          <legend class="section-title">Danh sách bỏ qua</legend>
+          <p class="field-hint">Gõ <b>tên kênh</b> (VD An Ninh, VTV1), <b>tên miền</b> (VD vtvprime.vn) hoặc <b>link đầy đủ</b>. Không cần đúng hoa thường hay dấu.</p>
+          <div class="exclude-add">
+            <input id="ex-entry" type="text" maxlength="200" autocomplete="off" placeholder="Tên kênh, mã kênh hoặc link" aria-label="Mục bỏ qua mới">
+            <input id="ex-note" type="text" maxlength="200" autocomplete="off" placeholder="Ghi chú (không bắt buộc)" aria-label="Ghi chú">
+            <button id="ex-add" class="btn" type="button" disabled>Thêm</button>
+          </div>
+          <p id="ex-preview" class="field-hint ex-preview" aria-live="polite"></p>
+          <ul id="ex-list" class="exclude-list"></ul>
+        </fieldset>
       </div>
+      <footer class="dialog-foot">
+        <p id="settings-changes" class="settings-changes" aria-live="polite"></p>
+        <p id="sch-error" class="form-error" role="alert" hidden></p>
+        <div class="dialog-actions">
+          <button class="text-btn" type="button" data-close>Huỷ</button>
+          <button id="sch-save" class="btn btn-primary" type="submit">Lưu</button>
+        </div>
+      </footer>
     </form>
   </dialog>
 

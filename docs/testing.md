@@ -18,7 +18,9 @@ Workflow [`Tests`](../.github/workflows/test.yml) chạy lại mỗi khi có cod
 | Quy mô | 1.000 link trên 21 host, timeout thu nhỏ 10 lần | `checker/test/scale.test.js` |
 | Dashboard | Chạy bằng Chromium: máy tính (1280 px), tablet (900 px), điện thoại (390 / 320 px); bấm thẻ, lọc, tìm, sắp xếp, copy, Hiện thêm, Xoá bộ lọc, link có bộ lọc (#country=…); màn hình đang tải / rỗng / lỗi 404 / lỗi mạng + Thử lại; không tràn ngang, không lỗi JS | thủ công (xem Phase 4) |
 | Dashboard ↔ Apps Script | Chromium gọi **chính `Code.gs`** (Sheet giả) qua web app giả: nhập sai / đúng mã, Chạy ngay → đang chờ → đang chạy → xong → tự tải kết quả mới, đang chạy thì khoá nút, Cài đặt (đổi mức kiểm tra → ghi ô B6 + tự chạy lại; đổi lịch, tắt, lịch không hợp lệ), nhớ mã sau khi tải lại, Apps Script cũ / không kết nối được | thủ công |
-| Exclude theo chữ | Unit test + dữ liệu iptv-org thật (VN, 84 link): `An Ninh` → 2 link An Ninh TV; `VTV` → 55 link VTV/VTVcab (không dính Lao SV TV, ANTV); `VTV1` → 6 link VTV1 (không VTV10); `vtvprime.vn` → 6 link trên tên miền đó; `TV` → không dùng; cột C "Đang bỏ" | `checker/test/source.test.js`, `monitor.test.js` |
+| Bỏ qua theo chữ | Unit test + dữ liệu iptv-org thật (VN, 84 link): `An Ninh` → 1 link An Ninh TV; `VTV` → 13 link VTV/VTVcab (không dính Lao SV TV, ANTV); `VTV1` không bỏ VTV10; `vtvprime.vn` → các link trên tên miền đó; `TV` → không dùng; số link = số dòng bị bỏ (khớp phần xem trước trên dashboard) |
+| Cấu hình trong Apps Script | Unit test `Code.gs`: chuyển từ Sheet cũ (B3:B6 + Exclude, kể cả khi quên *Cài đặt ban đầu*), lưu 300 mục bỏ qua qua giới hạn 9 kB, lưu từng phần, giá trị sai → không lưu gì, xung đột phiên bản, lưu nhiều lần → 1 lần chạy | `checker/test/apps-script.test.js` |
+| Trang Cài đặt | Chromium + chính `Code.gs` + danh mục iptv-org thật: tìm "thai" → Thái Lan (74 link), phạm vi VN+TH ≈ 158 link, xem trước "Sẽ bỏ 1 link: An Ninh TV", tóm tắt thay đổi, nhập mã → lưu → tự chạy lại, mở lại thấy giá trị đã lưu, xung đột khi người khác vừa lưu, xoá chip / mục, điện thoại (toàn màn hình, không tràn), Apps Script cũ (ẩn phạm vi / bỏ qua), chưa có `options.json` (thêm bằng mã) | thủ công | `checker/test/source.test.js`, `monitor.test.js` |
 | Lịch tự chạy, mã thao tác | Unit test trên `Code.gs`: đúng giờ chạy 1 lần/lượt, không chạy bù, bỏ lượt khi đang chạy, token hết hạn → báo lỗi, đổi lịch, khoá sau 10 lần sai mã | `checker/test/apps-script.test.js` |
 
 ## 15 test case đã yêu cầu
@@ -76,8 +78,8 @@ kiểm tra ngay sau khi làm xong [docs/setup.md](setup.md):
 |---|---|---|
 | Stream thật qua Sheet | Bước C2 với `VN`, mức 3 | Run xanh trong ~2–3 phút; khoảng 80% “Hoạt động”; khoảng 10% “Bị chặn truy cập” vì runner ở Mỹ (khớp smoke test) |
 | Apps Script thật | Mở Sheet sau lần chạy | `Streams` có dữ liệu, cột Trạng thái tô màu, “Kiểm tra lúc” đúng giờ VN |
-| Chạy ngay / tự chạy | Menu IPTV Monitor → Chạy ngay; sửa B3 | B9 (Thông báo) báo đã gửi; tab Actions có run mới (*workflow_dispatch*) sau vài phút |
-| Bố cục Config mới | Sheet cũ → Quản trị → Cài đặt ban đầu | Dòng 7 *Lịch tự chạy*, 8 *Trạng thái*, 9 *Thông báo*; hết ô tick B7; B3–B6 giữ nguyên |
+| Chạy ngay / tự chạy | Menu IPTV Monitor → Chạy ngay; lưu một thay đổi trong **Cài đặt** | B5 (Thông báo) báo đã gửi; tab Actions có run mới (*workflow_dispatch*) sau vài phút |
+| Chuyển cấu hình từ Sheet cũ | Sheet cũ → Quản trị → Cài đặt ban đầu | Sheet `Exclude` biến mất; `Config` dòng 2 ghi đúng quốc gia / mức / số mục bỏ qua cũ; **Cài đặt** trên dashboard hiện đúng các giá trị đó (kể cả ghi chú) |
 | Dashboard: thay đổi / lý do / hoạt động lần cuối | Mở dashboard sau lần chạy thứ 2 | Dòng *So với lần chạy trước* (bấm để lọc), mũi tên ▲▼ trên thẻ, lọc *Lý do*, cột *Hoạt động lần cuối* |
 | Lịch tự chạy | Xem tab Actions sau ~6 giờ | Có run *workflow_dispatch* trong ~10 phút sau các giờ đã hẹn (mặc định 01, 04, 07, 10, 13, 16, 19, 22 giờ VN) |
 | Dashboard: Chạy ngay / Cài đặt | Bấm **Chạy ngay** → nhập mã; mở **Cài đặt** → đổi mức kiểm tra / lịch → Lưu | Thanh trên cùng: *Đang chờ chạy* → *Đang chạy kiểm tra* → *Đã chạy xong*, rồi bảng tự tải kết quả mới; lịch mới hiện “lần tới …” |
